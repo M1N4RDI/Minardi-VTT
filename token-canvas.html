@@ -1,0 +1,301 @@
+<script>
+console.log("token-canvas carregado");
+
+TokenPlugin.Canvas = {
+    canvas: null,
+    ctx: null,
+    map: null,
+    selectionRect: null,
+    resizeObserver: null,
+
+    init() {
+        console.log("Canvas INIT");
+
+        this.map = document.getElementById("map-container");
+        if (!this.map) {
+            console.warn("map-container não encontrado");
+            return;
+        }
+
+        this.createLayer();
+        this.forceResize();
+
+        // Observa mudanças reais de tamanho
+        this.resizeObserver = new ResizeObserver(() => {
+            this.forceResize();
+        });
+
+        this.resizeObserver.observe(this.map);
+
+        // Fallback extra
+        window.addEventListener("resize", () => this.forceResize());
+    },
+
+    createLayer() {
+        this.canvas = document.createElement("canvas");
+        this.canvas.id = "token-layer";
+
+        this.canvas.style.position = "absolute";
+        this.canvas.style.left = "0";
+        this.canvas.style.top = "0";
+        this.canvas.style.width = "100%";
+        this.canvas.style.height = "100%";
+        this.canvas.style.pointerEvents = "auto";
+        this.canvas.style.zIndex = "8";
+
+        this.map.appendChild(this.canvas);
+        this.ctx = this.canvas.getContext("2d");
+    },
+
+    forceResize() {
+        if (!this.canvas || !this.map) return;
+
+        const rect = this.map.getBoundingClientRect();
+
+        if (rect.width === 0 || rect.height === 0) {
+            // tenta novamente no próximo frame
+            requestAnimationFrame(() => this.forceResize());
+            return;
+        }
+
+        this.canvas.width = rect.width;
+        this.canvas.height = rect.height;
+
+        this.draw();
+    },
+
+    draw() {
+        if (!this.ctx || !this.canvas) return;
+
+        const ctx = this.ctx;
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        const size = window.VTTGrid?.size || 50;
+
+        // cache simples de imagens
+        if (!this._imageCache) this._imageCache = {};
+
+        // === PASSADA 1: círculos ===
+        TokenPlugin.Model.all().forEach(t => {
+
+            const centerX = t.gx * size + (t.cells * size) / 2;
+            const centerY = t.gy * size + (t.cells * size) / 2;
+            const radius  = (t.cells * size) / 2;
+
+            const imageSrc = t.appearance?.image;
+
+            if (imageSrc) {
+
+                if (!this._imageCache[imageSrc]) {
+                    const img = new Image();
+                    img.src = imageSrc;
+                    this._imageCache[imageSrc] = img;
+
+                    img.onload = () => this.draw();
+                }
+
+                const img = this._imageCache[imageSrc];
+
+                if (img.complete) {
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                    ctx.closePath();
+                    ctx.clip();
+
+                    ctx.drawImage(
+                        img,
+                        centerX - radius,
+                        centerY - radius,
+                        radius * 2,
+                        radius * 2
+                    );
+
+                    ctx.restore();
+
+                    // borda de seleção
+                    if (TokenPlugin.Model.selected.has(t.id)) {
+                        ctx.beginPath();
+                        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                        ctx.lineWidth = 3;
+                        ctx.strokeStyle = "#f1c40f";
+                        ctx.stroke();
+                    }
+                }
+
+            } else {
+
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+
+            ctx.fillStyle = TokenPlugin.Model.selected.has(t.id)
+                ? "#f1c40f"
+                : "#111111";
+
+            ctx.fill();
+
+            // interrogação branca no centro
+            if (!TokenPlugin.Model.selected.has(t.id)) {
+                const fontSize = Math.max(14, radius);
+                ctx.font = `bold ${fontSize}px sans-serif`;
+                ctx.fillStyle = "#ffffff";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText("?", centerX, centerY);
+            }
+        }
+        });
+
+        // === PASSADA 2: anexos ===
+        TokenPlugin.Model.all().forEach(t => {
+
+            const centerX = t.gx * size + (t.cells * size) / 2;
+            const centerY = t.gy * size + (t.cells * size) / 2;
+            const radius  = (t.cells * size) / 2;
+
+            const showExtras = TokenPlugin.Model.isSelected(t.id)
+                || TokenPlugin.Control.hoveredId === t.id;
+
+            if (!showExtras) return;
+
+            // Barras de status
+            const barDefs = [
+                { key: "hp",      color: "#e74c3c" },
+                { key: "mana",    color: "#3498db" },
+                { key: "entropy", color: "#2ecc71" }
+            ];
+
+            const barHeight = 6;
+            const barGap = 1;
+            const barWidth = t.cells * size;
+            const barX = t.gx * size;
+
+            let barOffset = 0;
+            barDefs.forEach(def => {
+                const bar = t.bars?.[def.key];
+                if (!bar || !bar.enabled || bar.max <= 0) return;
+
+                const ratio = Math.max(0, Math.min(1, bar.current / bar.max));
+                const fillW = Math.round(barWidth * ratio);
+
+                const barY = (t.gy * size) - (barHeight + barGap) * (barOffset + 1) + barGap;
+
+                // fundo preto (barra inteira)
+                ctx.fillStyle = "#000000";
+                ctx.fillRect(barX, barY, barWidth, barHeight);
+
+                // preenchimento colorido (só a porção atual)
+                if (fillW > 0) {
+                    ctx.fillStyle = def.color;
+                    ctx.fillRect(barX, barY, fillW, barHeight);
+                }
+
+                barOffset++;
+            });
+
+            // Nome (suporte a múltiplas linhas)
+            const tokenName = t.appearance?.name || "";
+            if (tokenName) {
+                const fontSize = Math.max(12, size / 3);
+                const lineHeight = fontSize + 4;
+
+                ctx.font = `${fontSize}px sans-serif`;
+                ctx.textAlign = "center";
+                ctx.textBaseline = "top";
+
+                const lines = tokenName.split("\n");
+
+                const x = centerX;
+                const y = centerY + radius + 2;
+
+                // Calcula largura máxima
+                let maxWidth = 0;
+                lines.forEach(line => {
+                    const w = ctx.measureText(line).width;
+                    if (w > maxWidth) maxWidth = w;
+                });
+
+                const padding = 4;
+                const boxHeight = lines.length * lineHeight;
+
+                // Fundo
+                ctx.fillStyle = "rgba(0,0,0,0.7)";
+                ctx.fillRect(
+                    x - maxWidth / 2 - padding,
+                    y,
+                    maxWidth + padding * 2,
+                    boxHeight
+                );
+
+                // Texto
+                ctx.fillStyle = "#fff";
+                lines.forEach((line, i) => {
+                    ctx.fillText(line, x, y + (i * lineHeight) + 2);
+                });
+            }
+        });
+
+        if (this.selectionRect) {
+            const r = this.selectionRect;
+            ctx.strokeStyle = "#4e9af1";
+            ctx.fillStyle = "rgba(78,154,241,0.2)";
+            ctx.lineWidth = 1;
+            ctx.fillRect(r.x, r.y, r.w, r.h);
+            ctx.strokeRect(r.x, r.y, r.w, r.h);
+        }
+
+// texto flutuante do modo ataque
+        const atk = TokenPlugin.Control.attackMode;
+        const mousePos = TokenPlugin.Control.attackMousePos;
+
+        if (atk && mousePos) {
+            const size = window.VTTGrid?.size || 50;
+
+            // posição do mouse em células
+            const targetGx = mousePos.x / size;
+            const targetGy = mousePos.y / size;
+
+            // verifica se está em cima do próprio atacante
+            const attacker = TokenPlugin.Model.getById(atk.attackerId);
+            let isOverSelf = false;
+
+            if (attacker) {
+                const cx = attacker.gx * size + (attacker.cells * size) / 2;
+                const cy = attacker.gy * size + (attacker.cells * size) / 2;
+                const r  = (attacker.cells * size) / 2;
+                isOverSelf = Math.hypot(cx - mousePos.x, cy - mousePos.y) < r;
+            }
+
+            const label = isOverSelf
+                ? { label: "cancelar", color: "#e74c3c" }
+                : TokenPlugin.Control.getAttackLabel(atk.attackerId, targetGx, targetGy);
+
+            const tx = mousePos.x + 20;
+            const ty = mousePos.y - 10;
+
+            const fontSize = 12;
+            ctx.font = `bold ${fontSize}px sans-serif`;
+            ctx.textAlign = "left";
+            ctx.textBaseline = "top";
+
+            const textW = ctx.measureText(label.label).width;
+            const padding = 4;
+
+            // fundo
+            ctx.fillStyle = "rgba(0,0,0,0.75)";
+            ctx.fillRect(
+                tx - padding,
+                ty - padding,
+                textW + padding * 2,
+                fontSize + padding * 2
+            );
+
+            // texto colorido
+            ctx.fillStyle = label.color;
+            ctx.fillText(label.label, tx, ty);
+        }
+
+    }
+
+};
+</script>

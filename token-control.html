@@ -1,0 +1,419 @@
+<script>
+console.log("token-control carregado");
+
+TokenPlugin.Control = {
+    draggingGroup: null,
+    dragStartMouse: null,
+    dragStartPositions: null,
+    selecting: false,
+    selectStart: null,
+    initialized: false,
+    hoveredId: null,
+    attackMode: null, // null | { attackerId, type, subtype, idealRange, maxRange }
+    attackMousePos: null, // posição atual do mouse em pixels
+
+    safeDraw() {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                TokenPlugin.Canvas.draw();
+            });
+        });
+    },
+
+    init() {
+        if (this.initialized) return;
+        this.initialized = true;
+
+        console.log("Control INIT");
+
+        const canvas = TokenPlugin.Canvas.canvas;
+        if (!canvas) {
+            console.warn("Canvas não disponível no init");
+            return;
+        }
+
+        canvas.tabIndex = 0;
+        canvas.focus();
+
+        // =============================
+        // DOUBLE CLICK → criar token
+        // =============================
+        canvas.addEventListener("dblclick", (e) => {
+            if (!VTTMode.is("tokens")) return;
+
+            const pos = this.mouseToGrid(e);
+            TokenPlugin.Model.create(pos.gx, pos.gy);
+
+            this.safeDraw();
+
+            e.stopPropagation();
+            e.preventDefault();
+        }, true);
+
+        // =============================
+        // MOUSEDOWN
+        // =============================
+        canvas.addEventListener("mousedown", (e) => {
+            if (!VTTMode.is("tokens")) return;
+
+            const size = window.VTTGrid?.size || 50;
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+// modo ataque
+            if (this.attackMode) {
+                const clicked = TokenPlugin.Model.all().find(t => {
+                    const cx = t.gx * size + (t.cells * size) / 2;
+                    const cy = t.gy * size + (t.cells * size) / 2;
+                    const r  = (t.cells * size) / 2;
+                    return Math.hypot(cx - mx, cy - my) < r;
+                });
+
+                // clicou no próprio atacante = cancelar
+                if (clicked && clicked.id === this.attackMode.attackerId) {
+                    this.cancelAttack();
+                    return;
+                }
+
+                // clicou em área vazia = cancelar
+                if (!clicked) {
+                    this.cancelAttack();
+                    return;
+                }
+
+                // clicou em um alvo válido
+                if (!clicked.bars?.hp?.enabled) {
+                    alert("Este token não possui vitalidade configurada.");
+                    return;
+                }
+
+                // verifica alcance
+                const targetGx = (clicked.gx * size + (clicked.cells * size) / 2) / size;
+                const targetGy = (clicked.gy * size + (clicked.cells * size) / 2) / size;
+                const rangeCheck = this.getAttackLabel(this.attackMode.attackerId, targetGx, targetGy);
+
+                if (rangeCheck.label === "fora de alcance") {
+                    alert("Você deve escolher um personagem dentro do seu alcance para atacar.");
+                    return;
+                }
+
+                this.cancelAttack();
+                TokenPlugin.UI.openDamagePanel(clicked);
+                return;
+            }
+
+            const clickedToken = TokenPlugin.Model.all().find(t => {
+                const cx = t.gx * size + (t.cells * size) / 2;
+                const cy = t.gy * size + (t.cells * size) / 2;
+                const r  = (t.cells * size) / 2;
+                return Math.hypot(cx - mx, cy - my) < r;
+            });
+
+            if (clickedToken) {
+                const isCtrl = e.ctrlKey || e.metaKey;
+
+                if (isCtrl) {
+                    if (TokenPlugin.Model.isSelected(clickedToken.id))
+                        TokenPlugin.Model.selected.delete(clickedToken.id);
+                    else
+                        TokenPlugin.Model.addToSelection(clickedToken.id);
+
+                    this.safeDraw();
+                    return;
+                }
+
+                if (!TokenPlugin.Model.isSelected(clickedToken.id))
+                    TokenPlugin.Model.selectOnly(clickedToken.id);
+
+                this.draggingGroup = TokenPlugin.Model.getSelected();
+                this.dragStartMouse = { x: mx, y: my };
+                this.dragStartPositions = this.draggingGroup.map(t => ({
+                    token: t,
+                    gx: t.gx,
+                    gy: t.gy
+                }));
+
+                this.selecting = false;
+                this.safeDraw();
+                return;
+            }
+
+            TokenPlugin.Model.clearSelection();
+            this.draggingGroup = null;
+            this.selecting = true;
+            this.selectStart = { x: mx, y: my };
+
+            this.safeDraw();
+
+        }, true);
+
+        // =============================
+        // MOUSEMOVE
+        // =============================
+        canvas.addEventListener("mousemove", (e) => {
+            if (!VTTMode.is("tokens")) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const size = window.VTTGrid?.size || 50;
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+// tracking posição do mouse no modo ataque
+            if (this.attackMode) {
+                this.attackMousePos = { x: mx, y: my };
+                TokenPlugin.Canvas.draw();
+            }
+
+            // hover detection
+            const hovered = TokenPlugin.Model.all().find(t => {
+                const cx = t.gx * size + (t.cells * size) / 2;
+                const cy = t.gy * size + (t.cells * size) / 2;
+                const r  = (t.cells * size) / 2;
+                return Math.hypot(cx - mx, cy - my) < r;
+            });
+            const newHoveredId = hovered ? hovered.id : null;
+            if (newHoveredId !== this.hoveredId) {
+                this.hoveredId = newHoveredId;
+                this.safeDraw();
+            }
+
+            if (this.draggingGroup) {
+                const dx = Math.round((mx - this.dragStartMouse.x) / size);
+                const dy = Math.round((my - this.dragStartMouse.y) / size);
+
+                this.dragStartPositions.forEach(entry => {
+                    entry.token.gx = entry.gx + dx;
+                    entry.token.gy = entry.gy + dy;
+                });
+
+                this.safeDraw();
+                return;
+            }
+
+            if (this.selecting) {
+                TokenPlugin.Canvas.selectionRect = {
+                    x: this.selectStart.x,
+                    y: this.selectStart.y,
+                    w: mx - this.selectStart.x,
+                    h: my - this.selectStart.y
+                };
+
+                this.safeDraw();
+            }
+
+        }, true);
+
+        // =============================
+        // MOUSEUP
+        // =============================
+        canvas.addEventListener("mouseup", () => {
+            if (!VTTMode.is("tokens")) return;
+
+            if (this.selecting && TokenPlugin.Canvas.selectionRect) {
+                const size = window.VTTGrid?.size || 50;
+                const r = TokenPlugin.Canvas.selectionRect;
+
+                const x1 = Math.min(r.x, r.x + r.w);
+                const y1 = Math.min(r.y, r.y + r.h);
+                const x2 = Math.max(r.x, r.x + r.w);
+                const y2 = Math.max(r.y, r.y + r.h);
+
+                TokenPlugin.Model.selectInRect(x1, y1, x2, y2, size);
+
+                this.selecting = false;
+                this.selectStart = null;
+                TokenPlugin.Canvas.selectionRect = null;
+
+                this.safeDraw();
+            }
+
+            this.draggingGroup = null;
+            this.dragStartMouse = null;
+            this.dragStartPositions = null;
+
+        }, true);
+
+        // =============================
+        // TECLADO
+        // =============================
+        document.addEventListener("keydown", (e) => {
+            if (!VTTMode.is("tokens")) return;
+
+            const s = TokenPlugin.Model.getSelected();
+
+if (e.key === "Escape" && this.attackMode) {
+                this.cancelAttack();
+                return;
+            }
+
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+                e.preventDefault();
+                TokenPlugin.Model.selectAll();
+                this.safeDraw();
+                return;
+            }
+
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+                TokenPlugin.Model.copySelected();
+                return;
+            }
+
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+                TokenPlugin.Model.pasteClipboard(1, 1);
+                this.safeDraw();
+                return;
+            }
+
+            if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+                if (!s.length) return;
+
+                e.preventDefault();
+
+                let dx = 0, dy = 0;
+                if (e.key === "ArrowUp") dy = -1;
+                if (e.key === "ArrowDown") dy = 1;
+                if (e.key === "ArrowLeft") dx = -1;
+                if (e.key === "ArrowRight") dx = 1;
+
+                TokenPlugin.Model.moveSelected(dx, dy);
+                this.safeDraw();
+                return;
+            }
+
+            if (e.key === "Delete") {
+                if (!s.length) return;
+                TokenPlugin.Model.deleteSelected();
+                TokenPlugin.Tracker.syncWithModel();
+                this.safeDraw();
+            }
+
+        }, true);
+
+        // =============================
+        // BOTÃO DIREITO
+        // =============================
+        canvas.addEventListener("contextmenu", this.onRightClick.bind(this), true);
+
+        // =============================
+        // RESIZE PROTECTION
+        // =============================
+        window.addEventListener("resize", () => {
+            if (VTTMode?.is("tokens")) {
+                this.safeDraw();
+            }
+        });
+
+        // Redraw inicial seguro
+        this.safeDraw();
+    },
+
+startAttack(attackerId, config) {
+        this.attackMode = {
+            attackerId,
+            type:       config.type,
+            subtype:    config.subtype    || null,
+            idealRange: config.idealRange || null,
+            maxRange:   config.maxRange   || null
+        };
+        this.attackMousePos = null;
+
+        const canvas = TokenPlugin.Canvas.canvas;
+        canvas.style.cursor = "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><text y='24' font-size='24'>⚔️</text></svg>\") 8 8, crosshair";
+
+        console.log("[ATTACK MODE] iniciado por", attackerId);
+    },
+
+    cancelAttack() {
+        this.attackMode = null;
+        this.attackMousePos = null;
+        TokenPlugin.Canvas.canvas.style.cursor = "default";
+        TokenPlugin.Canvas.draw();
+        console.log("[ATTACK MODE] cancelado");
+    },
+
+    getAttackLabel(attackerId, targetGx, targetGy) {
+        const attacker = TokenPlugin.Model.getById(attackerId);
+        if (!attacker) return { label: "fora de alcance", color: "#e74c3c" };
+
+        const size = window.VTTGrid?.size || 50;
+        const ax = attacker.gx + attacker.cells / 2;
+        const ay = attacker.gy + attacker.cells / 2;
+        const dist = Math.round(Math.hypot(targetGx - ax, targetGy - ay));
+
+        const mode = this.attackMode;
+
+        if (mode.type === "melee") {
+            const attacker = TokenPlugin.Model.getById(attackerId);
+            if (!attacker) return { label: "fora de alcance", color: "#e74c3c" };
+
+            const ax = attacker.gx;
+            const ay = attacker.gy;
+
+            // posição do alvo em célula
+            const tgx = Math.floor(targetGx);
+            const tgy = Math.floor(targetGy);
+
+            const dx = Math.abs(tgx - ax);
+            const dy = Math.abs(tgy - ay);
+
+            if (mode.subtype === "short") {
+                // cruz: só ortogonal (dx+dy === 1)
+                const inRange = (dx + dy === 1);
+                return inRange
+                    ? { label: "alcance ideal", color: "#2ecc71" }
+                    : { label: "fora de alcance", color: "#e74c3c" };
+            } else {
+                // longo: todos os 8 vizinhos (dx<=1 && dy<=1)
+                const inRange = (dx <= 1 && dy <= 1 && (dx + dy > 0));
+                return inRange
+                    ? { label: "alcance ideal", color: "#2ecc71" }
+                    : { label: "fora de alcance", color: "#e74c3c" };
+            }
+        }
+
+        if (mode.type === "ranged") {
+            if (dist <= mode.idealRange) {
+                return { label: "alcance ideal", color: "#2ecc71" };
+            } else if (dist <= mode.maxRange) {
+                return { label: "alcance máximo", color: "#f1c40f" };
+            } else {
+                return { label: "fora de alcance", color: "#e74c3c" };
+            }
+        }
+
+        return { label: "fora de alcance", color: "#e74c3c" };
+    },
+
+    onRightClick(e) {
+        if (!VTTMode.is("tokens")) return;
+
+        const size = window.VTTGrid?.size || 50;
+        const rect = TokenPlugin.Canvas.canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const token = TokenPlugin.Model.all().find(t => {
+            const cx = t.gx * size + (t.cells * size) / 2;
+            const cy = t.gy * size + (t.cells * size) / 2;
+            const r  = (t.cells * size) / 2;
+            return Math.hypot(mouseX - cx, mouseY - cy) <= r;
+        });
+
+        if (token) {
+            e.preventDefault();
+            TokenPlugin.UI.show(e.clientX, e.clientY, token.id);
+        }
+    },
+
+    mouseToGrid(e) {
+        const rect = TokenPlugin.Canvas.canvas.getBoundingClientRect();
+        const size = window.VTTGrid?.size || 50;
+
+        return {
+            gx: Math.floor((e.clientX - rect.left) / size),
+            gy: Math.floor((e.clientY - rect.top) / size)
+        };
+    }
+};
+</script>

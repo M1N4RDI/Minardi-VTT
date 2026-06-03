@@ -1,0 +1,749 @@
+<script>
+// ============================================================
+// MINARDI VTT — AudioPlugin
+// audio-ui.html — Interface (sidebar + painel flutuante)
+// ============================================================
+
+console.log("audio-ui carregado");
+
+window.AudioPlugin = window.AudioPlugin || {};
+
+AudioPlugin.UI = {
+
+  _panel: null,
+  _progressInterval: null,
+  _expandedCategory: null, // categoria com faixas expandidas
+
+  init() {
+    console.log("AudioPlugin.UI INIT");
+    this._injectSidebarSection();
+    this._createFloatingPanel();
+    this._tryAutoConnect();
+  },
+
+  // ============================================================
+  // SIDEBAR
+  // ============================================================
+
+  _injectSidebarSection() {
+    const sidebar = document.getElementById("sidebar");
+    if (!sidebar) return;
+    const cat = document.createElement("div");
+    cat.className = "category";
+    cat.id = "audio-sidebar-section";
+    cat.innerHTML = `
+      <div class="category-title">🎵 Áudio</div>
+      <div class="control-group">
+        <label>Pasta Audio/ no Drive:</label>
+        <input type="text" id="audio-folder-id" placeholder="ID da pasta Audio/ (opcional)">
+        <button class="btn-full" style="background:#555;" onclick="AudioPlugin.UI._onConnectClick()">Conectar Drive</button>
+        <div id="audio-status" style="font-size:0.72em;color:#aaa;margin-top:4px;min-height:16px;"></div>
+      </div>
+      <div class="control-group">
+        <button class="btn-full" onclick="AudioPlugin.UI.togglePanel()">🎛️ Abrir Painel de Áudio</button>
+        <button class="btn-full" style="background:#444;margin-top:4px;" onclick="AudioPlugin.Drive.rescanLibrary()">🔄 Sincronizar</button>
+        <button class="btn-full" style="background:#3a3a3a;margin-top:4px;" onclick="AudioPlugin.Control.silence()">🔇 Silêncio Total</button>
+      </div>
+      <div id="audio-nowplaying" style="margin-top:8px;padding:6px 8px;background:rgba(0,0,0,0.2);border-radius:4px;font-size:0.75em;color:#aaa;min-height:20px;display:none;"></div>
+    `;
+    sidebar.appendChild(cat);
+    const saved = AudioPlugin.Model.audioFolderId;
+    if (saved) document.getElementById("audio-folder-id").value = saved;
+  },
+
+  _onConnectClick() {
+    const input = document.getElementById("audio-folder-id");
+    const id = input ? input.value.trim() : "";
+    if (id) {
+      AudioPlugin.Model.audioFolderId = id;
+      AudioPlugin.Model._saveToStorage();
+      AudioPlugin.Drive.scanLibrary();
+    } else {
+      AudioPlugin.Drive.connect();
+    }
+  },
+
+  _tryAutoConnect() {
+    const folderId = AudioPlugin.Model.audioFolderId;
+    if (folderId) {
+      const input = document.getElementById("audio-folder-id");
+      if (input) input.value = folderId;
+      AudioPlugin.Drive.scanLibrary();
+    }
+  },
+
+  setStatus(msg) {
+    const el = document.getElementById("audio-status");
+    if (el) el.textContent = msg;
+  },
+
+  updateNowPlaying() {
+    const el  = document.getElementById("audio-nowplaying");
+    if (!el) return;
+    const cur = AudioPlugin.Model.currentMusic;
+    if (!cur) { el.style.display = "none"; return; }
+    el.style.display = "block";
+    el.innerHTML = `<span style="color:#4e9af1;">▶</span> <strong>${cur.track.name}</strong> <span style="opacity:0.6;">— ${cur.category}</span>`;
+    this._updatePlayerControls();
+  },
+
+  // ============================================================
+  // PAINEL FLUTUANTE
+  // ============================================================
+
+  _createFloatingPanel() {
+    if (document.getElementById("audio-panel")) return;
+
+    const panel = document.createElement("div");
+    panel.id = "audio-panel";
+    panel.style.cssText = `
+      position:fixed; top:50px; left:50%; transform:translateX(-50%);
+      width:720px; max-width:98vw; max-height:90vh; overflow:hidden;
+      background:#141414;
+      border:1px solid rgba(78,154,241,0.3);
+      border-radius:14px;
+      box-shadow:0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.04);
+      z-index:200; display:none;
+      font-family:inherit; color:#e0e0e0;
+      flex-direction:column;
+    `;
+
+    panel.innerHTML = `
+      <!-- HEADER -->
+      <div id="audio-panel-header" style="
+        display:flex; justify-content:space-between; align-items:center;
+        padding:14px 18px 12px;
+        background:linear-gradient(180deg,#1e1e1e,#181818);
+        border-bottom:1px solid rgba(255,255,255,0.06);
+        cursor:move; flex-shrink:0;
+      ">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:18px;">🎵</span>
+          <span style="font-weight:700;font-size:1em;letter-spacing:0.5px;color:#fff;">Minardi Audio</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="audio-panel-status" style="font-size:0.7em;color:#666;"></span>
+          <button onclick="AudioPlugin.UI.togglePanel()" style="
+            background:rgba(255,255,255,0.06);border:none;color:#888;
+            width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:14px;
+            display:flex;align-items:center;justify-content:center;
+          ">✕</button>
+        </div>
+      </div>
+
+      <!-- PLAYER BAR -->
+      <div style="
+        background:#0f0f0f;
+        padding:16px 20px 12px;
+        border-bottom:1px solid rgba(255,255,255,0.05);
+        flex-shrink:0;
+      ">
+        <!-- Info da faixa -->
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+          <div id="audio-track-art" style="
+            width:44px;height:44px;border-radius:8px;flex-shrink:0;
+            background:linear-gradient(135deg,#1e3a5f,#0d1f33);
+            display:flex;align-items:center;justify-content:center;font-size:20px;
+          ">🎵</div>
+          <div style="flex:1;min-width:0;">
+            <div id="audio-track-name" style="
+              font-weight:600;font-size:0.95em;color:#fff;
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+            ">Nenhuma faixa</div>
+            <div id="audio-track-cat" style="font-size:0.75em;color:#666;margin-top:2px;">—</div>
+          </div>
+          <div id="audio-track-mode" style="font-size:0.7em;color:#555;flex-shrink:0;"></div>
+        </div>
+
+        <!-- Barra de progresso -->
+        <div style="margin-bottom:10px;">
+          <div style="position:relative;height:4px;background:rgba(255,255,255,0.08);border-radius:2px;cursor:pointer;"
+            id="audio-progress-bar"
+            onclick="AudioPlugin.UI._onProgressClick(event)"
+            onmouseenter="this.querySelector('#audio-progress-fill').style.height='6px';this.style.height='6px';this.style.marginTop='-1px';"
+            onmouseleave="this.querySelector('#audio-progress-fill').style.height='4px';this.style.height='4px';this.style.marginTop='0';"
+          >
+            <div id="audio-progress-fill" style="
+              height:4px;width:0%;
+              background:linear-gradient(90deg,#4e9af1,#7ab8f5);
+              border-radius:2px;transition:height 0.1s;
+              pointer-events:none;
+            "></div>
+            <div id="audio-progress-thumb" style="
+              position:absolute;top:50%;transform:translate(-50%,-50%);
+              width:12px;height:12px;border-radius:50%;
+              background:#4e9af1;left:0%;
+              pointer-events:none;opacity:0;transition:opacity 0.15s;
+            "></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:5px;">
+            <span id="audio-time-current" style="font-size:0.68em;color:#555;">0:00</span>
+            <span id="audio-time-total"   style="font-size:0.68em;color:#555;">0:00</span>
+          </div>
+        </div>
+
+        <!-- Controles -->
+        <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+          <!-- Modo playlist -->
+          <button id="audio-btn-mode" onclick="AudioPlugin.UI._cyclePlaylistMode()" title="Modo de reprodução" style="
+            background:none;border:none;color:#555;cursor:pointer;font-size:16px;
+            width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+            transition:color 0.15s;
+          ">🔀</button>
+
+          <!-- Anterior -->
+          <button onclick="AudioPlugin.Control.prevTrack()" title="Anterior" style="
+            background:none;border:none;color:#aaa;cursor:pointer;font-size:22px;
+            width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+            transition:all 0.15s;
+          " onmouseenter="this.style.color='#fff'" onmouseleave="this.style.color='#aaa'">⏮</button>
+
+          <!-- Play/Pause — botão principal -->
+          <button id="audio-btn-playpause" onclick="AudioPlugin.UI._onPlayPause()" style="
+            background:linear-gradient(135deg,#4e9af1,#3a7fd4);
+            border:none;color:#fff;cursor:pointer;
+            width:52px;height:52px;border-radius:50%;font-size:22px;
+            display:flex;align-items:center;justify-content:center;
+            box-shadow:0 4px 16px rgba(78,154,241,0.4);
+            transition:all 0.15s;
+          " onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'">▶</button>
+
+          <!-- Próximo -->
+          <button onclick="AudioPlugin.Control.nextTrack()" title="Próximo" style="
+            background:none;border:none;color:#aaa;cursor:pointer;font-size:22px;
+            width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+            transition:all 0.15s;
+          " onmouseenter="this.style.color='#fff'" onmouseleave="this.style.color='#aaa'">⏭</button>
+
+          <!-- Stop -->
+          <button onclick="AudioPlugin.Player.stopMusic()" title="Parar" style="
+            background:none;border:none;color:#555;cursor:pointer;font-size:16px;
+            width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+            transition:color 0.15s;
+          " onmouseenter="this.style.color='#e74c3c'" onmouseleave="this.style.color='#555'">⏹</button>
+        </div>
+      </div>
+
+      <!-- ABAS -->
+      <div id="audio-tabs" style="
+        display:flex;background:#111;
+        border-bottom:1px solid rgba(255,255,255,0.05);
+        flex-shrink:0;
+      ">
+        ${["Música","Ambiência","Efeitos","Soundscapes","Mixer"].map((t,i) => `
+          <button class="audio-tab-btn"
+            data-tab="${t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}"
+            onclick="AudioPlugin.UI.switchTab(this)"
+            style="
+              flex:1;padding:10px 4px;background:transparent;
+              border:none;border-bottom:2px solid ${i===0?'#4e9af1':'transparent'};
+              color:${i===0?'#e0e0e0':'#555'};cursor:pointer;
+              font-size:0.72em;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;
+              transition:all 0.15s;
+            "
+          >${t}</button>
+        `).join("")}
+      </div>
+
+      <!-- CONTEÚDO -->
+      <div style="overflow-y:auto;flex:1;">
+        <div id="audio-tab-musica"      style="padding:16px;" class="audio-tab-content"></div>
+        <div id="audio-tab-ambiencia"   style="padding:16px;display:none;" class="audio-tab-content"></div>
+        <div id="audio-tab-efeitos"     style="padding:16px;display:none;" class="audio-tab-content"></div>
+        <div id="audio-tab-soundscapes" style="padding:16px;display:none;" class="audio-tab-content"></div>
+        <div id="audio-tab-mixer"       style="padding:16px;display:none;" class="audio-tab-content"></div>
+      </div>
+    `;
+
+    // hover no progress bar mostra thumb
+    const bar = panel.querySelector("#audio-progress-bar");
+    if (bar) {
+      bar.addEventListener("mouseenter", () => {
+        const thumb = document.getElementById("audio-progress-thumb");
+        if (thumb) thumb.style.opacity = "1";
+      });
+      bar.addEventListener("mouseleave", () => {
+        const thumb = document.getElementById("audio-progress-thumb");
+        if (thumb) thumb.style.opacity = "0";
+      });
+    }
+
+    document.body.appendChild(panel);
+    this._panel = panel;
+    this._makeDraggable(panel, document.getElementById("audio-panel-header"));
+    this._startProgressLoop();
+  },
+
+  togglePanel() {
+    if (!this._panel) this._createFloatingPanel();
+    const visible = this._panel.style.display !== "none";
+    this._panel.style.display = visible ? "none" : "flex";
+    if (!visible) {
+      this.renderLibrary();
+      this._updatePlayerControls();
+    }
+  },
+
+  switchTab(btn) {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll(".audio-tab-btn").forEach(b => {
+      b.style.borderBottom = "2px solid transparent";
+      b.style.color = "#555";
+    });
+    btn.style.borderBottom = "2px solid #4e9af1";
+    btn.style.color = "#e0e0e0";
+    document.querySelectorAll(".audio-tab-content").forEach(el => el.style.display = "none");
+    const content = document.getElementById("audio-tab-" + tab);
+    if (content) content.style.display = "block";
+  },
+
+  // ============================================================
+  // PLAYER CONTROLS
+  // ============================================================
+
+  _onPlayPause() {
+    const cur = AudioPlugin.Model.currentMusic;
+    if (!cur) return; // nada selecionado
+    AudioPlugin.Player.pauseMusic();
+    this._updatePlayerControls();
+  },
+
+  _updatePlayerControls() {
+    const btn  = document.getElementById("audio-btn-playpause");
+    const name = document.getElementById("audio-track-name");
+    const cat  = document.getElementById("audio-track-cat");
+    const mode = document.getElementById("audio-track-mode");
+    const cur  = AudioPlugin.Model.currentMusic;
+
+    if (btn) btn.textContent = AudioPlugin.Player.isPaused() ? "▶" : "⏸";
+    if (name) name.textContent = cur ? cur.track.name : "Nenhuma faixa";
+    if (cat)  cat.textContent  = cur ? cur.category   : "—";
+
+    const modeLabels = { random: "🔀 Aleatório", sequential: "🔁 Sequencial", single: "🔂 Única" };
+    if (mode) mode.textContent = modeLabels[AudioPlugin.Model.playlist.mode] || "";
+
+    const modeBtn = document.getElementById("audio-btn-mode");
+    const modeColors = { random: "#4e9af1", sequential: "#2ecc71", single: "#f1c40f" };
+    if (modeBtn) modeBtn.style.color = modeColors[AudioPlugin.Model.playlist.mode] || "#555";
+  },
+
+  _cyclePlaylistMode() {
+    const modes = ["random", "sequential", "single"];
+    const cur   = AudioPlugin.Model.playlist.mode;
+    AudioPlugin.Model.playlist.mode = modes[(modes.indexOf(cur) + 1) % modes.length];
+    AudioPlugin.Model._saveToStorage();
+    this._updatePlayerControls();
+    // atualiza select na aba música se estiver aberta
+    const sel = document.getElementById("audio-playlist-mode");
+    if (sel) sel.value = AudioPlugin.Model.playlist.mode;
+  },
+
+  _onProgressClick(e) {
+    const bar = document.getElementById("audio-progress-bar");
+    if (!bar) return;
+    const rect  = bar.getBoundingClientRect();
+    const ratio = (e.clientX - rect.left) / rect.width;
+    AudioPlugin.Player.seekTo(Math.max(0, Math.min(1, ratio)));
+  },
+
+  _startProgressLoop() {
+    if (this._progressInterval) return;
+    this._progressInterval = setInterval(() => this.updateProgressBar(), 500);
+  },
+
+  updateProgressBar() {
+    const fill    = document.getElementById("audio-progress-fill");
+    const thumb   = document.getElementById("audio-progress-thumb");
+    const timeCur = document.getElementById("audio-time-current");
+    const timeEnd = document.getElementById("audio-time-total");
+    const btn     = document.getElementById("audio-btn-playpause");
+
+    const cur = AudioPlugin.Player.getCurrentTime();
+    const dur = AudioPlugin.Player.getDuration();
+    const pct = dur > 0 ? (cur / dur) * 100 : 0;
+
+    if (fill)    fill.style.width = pct + "%";
+    if (thumb)   thumb.style.left = pct + "%";
+    if (timeCur) timeCur.textContent = this._fmtTime(cur);
+    if (timeEnd) timeEnd.textContent = this._fmtTime(dur);
+    if (btn)     btn.textContent = AudioPlugin.Player.isPaused() ? "▶" : "⏸";
+  },
+
+  _fmtTime(s) {
+    if (!s || isNaN(s)) return "0:00";
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return m + ":" + String(sec).padStart(2, "0");
+  },
+
+  // ============================================================
+  // BIBLIOTECA
+  // ============================================================
+
+  renderLibrary() {
+    this._renderMusicTab();
+    this._renderAmbienceTab();
+    this._renderEffectsTab();
+    this._renderSoundscapesTab();
+    this.renderMixer();
+    this._updatePlayerControls();
+  },
+
+  // ---- MÚSICA ----
+
+  _renderMusicTab() {
+    const el = document.getElementById("audio-tab-musica");
+    if (!el) return;
+    const model = AudioPlugin.Model;
+    const cats  = model.getCategories("music");
+
+    if (!cats.length) {
+      el.innerHTML = `<p style="color:#444;font-size:0.85em;text-align:center;padding:20px 0;">Nenhuma música encontrada.<br>Conecte o Drive primeiro.</p>`;
+      return;
+    }
+
+    el.innerHTML = `
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+        <label style="font-size:0.72em;color:#555;margin:0;">MODO:</label>
+        <select id="audio-playlist-mode"
+          onchange="AudioPlugin.Model.playlist.mode=this.value;AudioPlugin.Model._saveToStorage();AudioPlugin.UI._updatePlayerControls();"
+          style="background:#1e1e1e;border:1px solid rgba(255,255,255,0.1);color:#ccc;padding:5px 10px;border-radius:6px;font-size:0.78em;">
+          <option value="random"     ${model.playlist.mode==="random"?"selected":""}>🔀 Aleatório</option>
+          <option value="sequential" ${model.playlist.mode==="sequential"?"selected":""}>🔁 Sequencial</option>
+          <option value="single"     ${model.playlist.mode==="single"?"selected":""}>🔂 Música Única</option>
+        </select>
+      </div>
+      <div id="audio-music-cats" style="display:flex;flex-direction:column;gap:4px;"></div>
+    `;
+
+    const container = document.getElementById("audio-music-cats");
+    cats.forEach(cat => {
+      const tracks    = model.getTracks("music", cat);
+      const isCurrent = model.currentMusic?.category === cat;
+      const isExpanded = this._expandedCategory === cat;
+
+      const wrapper = document.createElement("div");
+      wrapper.style.cssText = `
+        border-radius:8px;overflow:hidden;
+        border:1px solid ${isCurrent ? "rgba(78,154,241,0.4)" : "rgba(255,255,255,0.06)"};
+        background:${isCurrent ? "rgba(78,154,241,0.08)" : "rgba(255,255,255,0.03)"};
+        transition:border-color 0.15s;
+      `;
+
+      // Cabeçalho da categoria
+      const header = document.createElement("div");
+      header.style.cssText = `
+        display:flex;align-items:center;justify-content:space-between;
+        padding:10px 14px;cursor:pointer;
+      `;
+      header.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:16px;transition:transform 0.2s;" id="arrow-${cat}">${isExpanded?"▾":"▸"}</span>
+          <div>
+            <div style="font-weight:600;font-size:0.88em;color:${isCurrent?"#4e9af1":"#ccc"};">${cat}</div>
+            <div style="font-size:0.7em;color:#444;margin-top:1px;">${tracks.length} faixa${tracks.length!==1?"s":""}</div>
+          </div>
+          ${isCurrent ? `<span style="font-size:10px;background:rgba(78,154,241,0.2);color:#4e9af1;padding:2px 7px;border-radius:10px;margin-left:4px;">TOCANDO</span>` : ""}
+        </div>
+        <button onclick="event.stopPropagation();AudioPlugin.Control.playCategory('${cat}',true)" style="
+          padding:6px 14px;
+          background:${isCurrent?"rgba(78,154,241,0.2)":"rgba(255,255,255,0.07)"};
+          color:${isCurrent?"#4e9af1":"#aaa"};
+          border:1px solid ${isCurrent?"rgba(78,154,241,0.3)":"rgba(255,255,255,0.08)"};
+          border-radius:20px;cursor:pointer;font-size:0.75em;font-weight:600;
+          transition:all 0.15s;
+        " onmouseenter="this.style.background='rgba(78,154,241,0.25)';this.style.color='#4e9af1'"
+           onmouseleave="this.style.background='${isCurrent?"rgba(78,154,241,0.2)":"rgba(255,255,255,0.07)"}';this.style.color='${isCurrent?"#4e9af1":"#aaa"}'">
+          ▶ Play
+        </button>
+      `;
+
+      header.addEventListener("click", () => {
+        this._expandedCategory = isExpanded ? null : cat;
+        this._renderMusicTab();
+      });
+
+      wrapper.appendChild(header);
+
+      // Lista de faixas (expandida)
+      if (isExpanded) {
+        const trackList = document.createElement("div");
+        trackList.style.cssText = `
+          border-top:1px solid rgba(255,255,255,0.05);
+          background:rgba(0,0,0,0.2);
+        `;
+        tracks.forEach((track, i) => {
+          const isCurrentTrack = model.currentMusic?.track.url === track.url;
+          const row = document.createElement("div");
+          row.style.cssText = `
+            display:flex;align-items:center;gap:10px;
+            padding:8px 14px;cursor:pointer;
+            background:${isCurrentTrack?"rgba(78,154,241,0.1)":"transparent"};
+            border-bottom:1px solid rgba(255,255,255,0.03);
+            transition:background 0.1s;
+          `;
+          row.innerHTML = `
+            <span style="font-size:11px;color:#444;width:18px;text-align:right;flex-shrink:0;">${isCurrentTrack?"▶":i+1}</span>
+            <span style="flex:1;font-size:0.82em;color:${isCurrentTrack?"#4e9af1":"#bbb"};
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+              ${track.name}
+            </span>
+          `;
+          row.addEventListener("mouseenter", () => { if (!isCurrentTrack) row.style.background = "rgba(255,255,255,0.04)"; });
+          row.addEventListener("mouseleave", () => { if (!isCurrentTrack) row.style.background = "transparent"; });
+          row.addEventListener("click", () => AudioPlugin.Control.playTrack(cat, track, true));
+          trackList.appendChild(row);
+        });
+        wrapper.appendChild(trackList);
+      }
+
+      container.appendChild(wrapper);
+    });
+  },
+
+  // ---- AMBIÊNCIA ----
+
+  _renderAmbienceTab() {
+    const el = document.getElementById("audio-tab-ambiencia");
+    if (!el) return;
+    const cats = AudioPlugin.Model.getCategories("ambience");
+    if (!cats.length) {
+      el.innerHTML = `<p style="color:#444;font-size:0.85em;text-align:center;padding:20px 0;">Nenhuma ambiência encontrada.</p>`;
+      return;
+    }
+    el.innerHTML = `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+        <button onclick="AudioPlugin.Control.stopAllAmbiences()" style="
+          padding:5px 12px;background:rgba(231,76,60,0.15);color:#e74c3c;
+          border:1px solid rgba(231,76,60,0.2);border-radius:6px;cursor:pointer;font-size:0.75em;
+        ">⏹ Parar Todas</button>
+      </div>
+      <div id="audio-ambience-cats" style="display:flex;flex-direction:column;gap:6px;"></div>
+    `;
+    this.updateAmbienceState();
+  },
+
+  updateAmbienceState() {
+    const container = document.getElementById("audio-ambience-cats");
+    if (!container) return;
+    container.innerHTML = "";
+    const model = AudioPlugin.Model;
+    model.getCategories("ambience").forEach(cat => {
+      const isActive = !!model.activeAmbiences[cat];
+      const row = document.createElement("div");
+      row.style.cssText = `
+        background:${isActive?"rgba(46,204,113,0.08)":"rgba(255,255,255,0.03)"};
+        border:1px solid ${isActive?"rgba(46,204,113,0.25)":"rgba(255,255,255,0.06)"};
+        border-radius:8px; padding:10px 14px;
+        display:flex;align-items:center;justify-content:space-between;
+        transition:all 0.2s;
+      `;
+      row.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:18px;">${isActive?"🔊":"🔈"}</span>
+          <span style="font-weight:600;font-size:0.88em;color:${isActive?"#2ecc71":"#888"};">${cat}</span>
+          ${isActive?`<span style="font-size:10px;background:rgba(46,204,113,0.2);color:#2ecc71;padding:2px 7px;border-radius:10px;">ATIVA</span>`:""}
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          ${isActive?`<input type="range" min="0" max="100"
+            value="${model.activeAmbiences[cat]?.volume ?? model.volumes.ambience}"
+            style="width:80px;"
+            oninput="AudioPlugin.Model.activeAmbiences['${cat}']&&(AudioPlugin.Model.activeAmbiences['${cat}'].volume=+this.value);AudioPlugin.Player.setAmbienceVolume('${cat}',+this.value);">`:""}
+          <button onclick="AudioPlugin.Control.toggleAmbience('${cat}')" style="
+            padding:6px 14px;
+            background:${isActive?"rgba(46,204,113,0.2)":"rgba(255,255,255,0.07)"};
+            color:${isActive?"#2ecc71":"#888"};
+            border:1px solid ${isActive?"rgba(46,204,113,0.3)":"rgba(255,255,255,0.08)"};
+            border-radius:20px;cursor:pointer;font-size:0.75em;font-weight:600;
+          ">${isActive?"✓ Ativa":"Ativar"}</button>
+        </div>
+      `;
+      container.appendChild(row);
+    });
+  },
+
+  // ---- EFEITOS ----
+
+  _renderEffectsTab() {
+    const el = document.getElementById("audio-tab-efeitos");
+    if (!el) return;
+    const model = AudioPlugin.Model;
+    const cats  = model.getCategories("effects");
+    if (!cats.length) {
+      el.innerHTML = `<p style="color:#444;font-size:0.85em;text-align:center;padding:20px 0;">Nenhum efeito encontrado.</p>`;
+      return;
+    }
+    el.innerHTML = `<div id="audio-effects-content" style="display:flex;flex-direction:column;gap:16px;"></div>`;
+    const content = document.getElementById("audio-effects-content");
+
+    if (model.favoriteEffects.length) {
+      const favSection = document.createElement("div");
+      favSection.innerHTML = `<div style="font-size:0.68em;text-transform:uppercase;color:#f1c40f;margin-bottom:8px;letter-spacing:1px;font-weight:600;">⭐ Favoritos</div>`;
+      const grid = document.createElement("div");
+      grid.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;";
+      model.favoriteEffects.forEach(fav => grid.appendChild(this._makeEffectButton(fav.category, { name: fav.name, url: fav.url })));
+      favSection.appendChild(grid);
+      content.appendChild(favSection);
+    }
+
+    cats.forEach(cat => {
+      const tracks = model.getTracks("effects", cat);
+      if (!tracks.length) return;
+      const section = document.createElement("div");
+      section.innerHTML = `<div style="font-size:0.68em;text-transform:uppercase;color:#555;margin-bottom:8px;letter-spacing:1px;font-weight:600;">${cat}</div>`;
+      const grid = document.createElement("div");
+      grid.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;";
+      tracks.forEach(track => grid.appendChild(this._makeEffectButton(cat, track)));
+      section.appendChild(grid);
+      content.appendChild(section);
+    });
+  },
+
+  _makeEffectButton(category, track) {
+    const isFav = AudioPlugin.Model.isFavoriteEffect(category, track.name);
+    const wrapper = document.createElement("div");
+    wrapper.style.cssText = `
+      display:flex;align-items:stretch;border-radius:6px;overflow:hidden;
+      border:1px solid rgba(255,255,255,0.07);
+      background:rgba(255,255,255,0.03);
+      transition:border-color 0.15s;
+    `;
+    const playBtn = document.createElement("button");
+    playBtn.textContent = "🔊 " + track.name;
+    playBtn.style.cssText = `padding:7px 12px;background:transparent;color:#ccc;border:none;cursor:pointer;font-size:0.78em;`;
+    playBtn.onclick = () => AudioPlugin.Control.triggerEffect(track.url);
+    playBtn.addEventListener("mouseenter", () => { playBtn.style.color = "#fff"; wrapper.style.borderColor = "rgba(255,255,255,0.15)"; });
+    playBtn.addEventListener("mouseleave", () => { playBtn.style.color = "#ccc"; wrapper.style.borderColor = "rgba(255,255,255,0.07)"; });
+
+    const favBtn = document.createElement("button");
+    favBtn.textContent = isFav ? "★" : "☆";
+    favBtn.style.cssText = `padding:7px 9px;background:transparent;color:${isFav?"#f1c40f":"#333"};border:none;border-left:1px solid rgba(255,255,255,0.06);cursor:pointer;font-size:13px;`;
+    favBtn.onclick = () => { AudioPlugin.Model.toggleFavoriteEffect(category, track); this._renderEffectsTab(); };
+
+    wrapper.appendChild(playBtn);
+    wrapper.appendChild(favBtn);
+    return wrapper;
+  },
+
+  // ---- SOUNDSCAPES ----
+
+  _renderSoundscapesTab() {
+    const el = document.getElementById("audio-tab-soundscapes");
+    if (!el) return;
+    const model = AudioPlugin.Model;
+    el.innerHTML = `
+      <div style="margin-bottom:16px;padding:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;">
+        <div style="font-size:0.72em;color:#555;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.8px;">Salvar estado atual</div>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="audio-sc-name" placeholder="Nome da soundscape..."
+            style="flex:1;background:#0f0f0f;border:1px solid rgba(255,255,255,0.1);color:#ccc;padding:7px 10px;border-radius:6px;font-size:0.85em;">
+          <button onclick="AudioPlugin.UI._saveSoundscape()" style="
+            padding:7px 14px;background:rgba(78,154,241,0.2);color:#4e9af1;
+            border:1px solid rgba(78,154,241,0.3);border-radius:6px;cursor:pointer;font-size:0.8em;font-weight:600;
+          ">💾 Salvar</button>
+        </div>
+      </div>
+      <div id="audio-sc-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+    `;
+    const list = document.getElementById("audio-sc-list");
+    if (!model.soundscapes.length) {
+      list.innerHTML = `<p style="color:#333;font-size:0.82em;text-align:center;padding:16px 0;">Nenhuma soundscape salva ainda.</p>`;
+      return;
+    }
+    model.soundscapes.forEach(sc => {
+      const row = document.createElement("div");
+      row.style.cssText = `
+        background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);
+        border-radius:8px;padding:12px 14px;
+        display:flex;align-items:center;justify-content:space-between;gap:8px;
+        transition:border-color 0.15s;
+      `;
+      row.addEventListener("mouseenter", () => row.style.borderColor = "rgba(255,255,255,0.12)");
+      row.addEventListener("mouseleave", () => row.style.borderColor = "rgba(255,255,255,0.07)");
+      const info = document.createElement("div");
+      info.innerHTML = `
+        <div style="font-weight:600;font-size:0.88em;color:#ddd;">${sc.name}</div>
+        <div style="font-size:0.7em;color:#444;margin-top:3px;">
+          🎵 ${sc.music||"—"} &nbsp;·&nbsp; 🌧 ${(sc.ambiences||[]).join(", ")||"—"}
+        </div>
+      `;
+      const btns = document.createElement("div");
+      btns.style.cssText = "display:flex;gap:6px;flex-shrink:0;";
+      const playBtn = document.createElement("button");
+      playBtn.textContent = "▶ Ativar";
+      playBtn.style.cssText = `padding:6px 14px;background:rgba(78,154,241,0.2);color:#4e9af1;border:1px solid rgba(78,154,241,0.3);border-radius:20px;cursor:pointer;font-size:0.75em;font-weight:600;`;
+      playBtn.onclick = () => AudioPlugin.Control.activateSoundscape(sc);
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "✕";
+      delBtn.style.cssText = `padding:6px 10px;background:rgba(231,76,60,0.1);color:#e74c3c;border:1px solid rgba(231,76,60,0.2);border-radius:20px;cursor:pointer;font-size:0.75em;`;
+      delBtn.onclick = () => { if (confirm(`Apagar "${sc.name}"?`)) { AudioPlugin.Model.deleteSoundscape(sc.name); this._renderSoundscapesTab(); } };
+      btns.appendChild(playBtn);
+      btns.appendChild(delBtn);
+      row.appendChild(info);
+      row.appendChild(btns);
+      list.appendChild(row);
+    });
+  },
+
+  _saveSoundscape() {
+    const input = document.getElementById("audio-sc-name");
+    const name  = input ? input.value.trim() : "";
+    if (!name) { alert("Digite um nome para a soundscape."); return; }
+    AudioPlugin.Model.saveSoundscape(name);
+    if (input) input.value = "";
+    this._renderSoundscapesTab();
+  },
+
+  // ---- MIXER ----
+
+  renderMixer() {
+    const el = document.getElementById("audio-tab-mixer");
+    if (!el) return;
+    const model = AudioPlugin.Model;
+    const channels = [
+      { key:"master",   label:"Master",    icon:"🔊", color:"#4e9af1" },
+      { key:"music",    label:"Música",    icon:"🎵", color:"#7ab8f5" },
+      { key:"ambience", label:"Ambiência", icon:"🌧", color:"#2ecc71" },
+      { key:"effects",  label:"Efeitos",   icon:"💥", color:"#f1c40f" }
+    ];
+    el.innerHTML = `<div style="display:flex;flex-direction:column;gap:18px;padding:4px 0;">` +
+      channels.map(ch => `
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <label style="font-size:0.8em;color:#888;display:flex;align-items:center;gap:6px;">
+              <span>${ch.icon}</span><span>${ch.label}</span>
+            </label>
+            <span id="audio-vol-label-${ch.key}" style="font-size:0.78em;font-weight:600;color:${ch.color};">${model.volumes[ch.key]}%</span>
+          </div>
+          <input type="range" min="0" max="100" value="${model.volumes[ch.key]}" id="audio-vol-${ch.key}"
+            style="accent-color:${ch.color};"
+            oninput="document.getElementById('audio-vol-label-${ch.key}').textContent=this.value+'%';AudioPlugin.Control.setVolume('${ch.key}',+this.value);">
+        </div>
+      `).join("") +
+    `</div>`;
+  },
+
+  // ============================================================
+  // UTILS
+  // ============================================================
+
+  _makeDraggable(el, handle) {
+    let dragging = false, ox = 0, oy = 0;
+    (handle || el).style.cursor = "move";
+    (handle || el).addEventListener("mousedown", e => {
+      if (e.target.tagName === "BUTTON") return;
+      dragging = true;
+      const rect = el.getBoundingClientRect();
+      ox = e.clientX - rect.left;
+      oy = e.clientY - rect.top;
+      el.style.transform = "none";
+    });
+    document.addEventListener("mousemove", e => {
+      if (!dragging) return;
+      el.style.left = (e.clientX - ox) + "px";
+      el.style.top  = (e.clientY - oy) + "px";
+    });
+    document.addEventListener("mouseup", () => { dragging = false; });
+  }
+};
+</script>

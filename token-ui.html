@@ -1,0 +1,788 @@
+<script>
+// token-ui.html
+// Não usa mais IIFE com waitForVTT próprio.
+// A inicialização é disparada pelo TokenPlugin.boot() em token-main,
+// após Canvas.init() garantidamente ter rodado.
+
+console.log("token-ui carregado");
+
+(function TOKEN_UI_BOOT() {
+
+    let tokenObserverInterval = null;
+    let lastTokenSignature    = "";
+
+    // Expõe o objeto UI imediatamente — boot() chamará UI.init() no momento certo
+    window.TokenPlugin = window.TokenPlugin || {};
+
+    TokenPlugin.UI = {
+        menu: null,
+        currentTokenId: null,
+
+        init() {
+            console.log("TokenPlugin.UI INIT");
+            this.createMenu();
+            injectTokenUI();
+            enableMapDrop();
+            startTokenObserver();
+        },
+
+        createMenu() {
+            if (document.getElementById("token-context-menu")) return;
+            this.menu = document.createElement("div");
+            this.menu.id = "token-context-menu";
+            this.menu.style.cssText = "position:fixed;display:none;z-index:9999;background:#1e1e1e;border:1px solid #555;border-radius:6px;padding:6px;min-width:140px;box-shadow:0 2px 6px rgba(0,0,0,0.4);";
+
+            this.menu.innerHTML = `
+                <div class="menu-item" data-action="increase">➕ Aumentar</div>
+                <div class="menu-item" data-action="decrease">➖ Diminuir</div>
+                <div class="menu-item" data-action="rename">✏️ Nome</div>
+                <div class="menu-item" data-action="edit-hp">❤️ Vitalidade</div>
+                <div class="menu-item" data-action="edit-mana">🔵 Mana</div>
+                <div class="menu-item" data-action="edit-entropy">💀 Entropia</div>
+                <div class="menu-item" data-action="edit-initiative">⚔️ Iniciativa</div>
+                <div class="menu-item" data-action="edit-armor">🛡️ Armadura</div>
+                <div class="menu-item" data-action="receive-damage">🩸 Receber Dano</div>
+                <div class="menu-item" data-action="attack">🗡️ Atacar</div>
+                <div class="menu-item" data-action="notes">📝 Notas</div>
+            `;
+
+            document.body.appendChild(this.menu);
+
+            this.menu.addEventListener("click", (e) => {
+                const item = e.target.closest(".menu-item");
+                if (!item) return;
+
+                const action  = item.dataset.action;
+                const tokenId = this.currentTokenId;
+                if (tokenId == null) return;
+
+                const token = TokenPlugin.Model.all().find(t => t.id === tokenId);
+                if (!token) return;
+
+                // ---- AUMENTAR / DIMINUIR ----
+                if (action === "increase") { TokenPlugin.Model.changeSize(tokenId,  1); TokenPlugin.Canvas.draw(); this.hide(); return; }
+                if (action === "decrease") { TokenPlugin.Model.changeSize(tokenId, -1); TokenPlugin.Canvas.draw(); this.hide(); return; }
+
+                // ---- RENAME ----
+                if (action === "rename") {
+                    const editor = document.createElement("textarea");
+                    editor.value = token.appearance.name || "";
+                    editor.style.cssText = `
+                        position:fixed;
+                        left:${this.menu.style.left};
+                        top:${this.menu.style.top};
+                        z-index:10000;
+                        width:180px;
+                        min-height:60px;
+                        background:#1e1e1e;
+                        color:white;
+                        border:1px solid #555;
+                        border-radius:6px;
+                        padding:6px;
+                        resize:none;
+                        font-family:inherit;
+                    `;
+                    document.body.appendChild(editor);
+                    editor.focus();
+                    editor.addEventListener("keydown", (ev) => {
+                        if (ev.key === "Enter" && ev.shiftKey) return;
+                        if (ev.key === "Enter") {
+                            ev.preventDefault();
+                            token.appearance.name = editor.value;
+                            document.body.removeChild(editor);
+                            TokenPlugin.Canvas.draw();
+                        }
+                        if (ev.key === "Escape") document.body.removeChild(editor);
+                    });
+                    this.hide(); return;
+                }
+
+                // ---- VITALIDADE ----
+                if (action === "edit-hp") {
+                    const bar    = token.bars.hp;
+                    const editor = document.createElement("div");
+                    editor.style.cssText = `position:fixed;left:${this.menu.style.left};top:${this.menu.style.top};z-index:10000;background:#1e1e1e;border:1px solid #555;border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:4px;font-family:inherit;color:white;font-size:13px;`;
+                    editor.innerHTML = `
+                        <div style="margin-bottom:2px;color:#e74c3c;font-weight:bold;">❤️ Vitalidade</div>
+                        <div style="display:flex;gap:4px;align-items:center;">
+                            <span style="opacity:0.7;font-size:11px;">Atual</span>
+                            <input id="hp-current" type="number" value="${bar.current}" style="width:60px;background:#111;color:white;border:1px solid #444;padding:3px;border-radius:3px;">
+                        </div>
+                        <div style="display:flex;gap:4px;align-items:center;">
+                            <span style="opacity:0.7;font-size:11px;">Máx</span>
+                            <input id="hp-max" type="number" value="${bar.max}" style="width:60px;background:#111;color:white;border:1px solid #444;padding:3px;border-radius:3px;">
+                        </div>
+                        <div style="display:flex;gap:4px;margin-top:2px;">
+                            <button id="hp-confirm" style="flex:1;background:#e74c3c;color:white;border:none;padding:4px;border-radius:3px;cursor:pointer;">✔</button>
+                            <button id="hp-cancel"  style="flex:1;background:#333;color:white;border:none;padding:4px;border-radius:3px;cursor:pointer;">✖</button>
+                        </div>
+                    `;
+                    document.body.appendChild(editor);
+                    const cleanup = () => { if (editor.parentNode) document.body.removeChild(editor); };
+                    editor.querySelector("#hp-confirm").onclick = () => {
+                        token.bars.hp.current = parseFloat(editor.querySelector("#hp-current").value) || 0;
+                        token.bars.hp.max     = parseFloat(editor.querySelector("#hp-max").value)     || 0;
+                        token.bars.hp.enabled = token.bars.hp.max > 0;
+                        cleanup(); TokenPlugin.Canvas.draw();
+                    };
+                    editor.querySelector("#hp-cancel").onclick = cleanup;
+                    this.hide(); return;
+                }
+
+                // ---- MANA ----
+                if (action === "edit-mana") {
+                    const bar    = token.bars.mana;
+                    const editor = document.createElement("div");
+                    editor.style.cssText = `position:fixed;left:${this.menu.style.left};top:${this.menu.style.top};z-index:10000;background:#1e1e1e;border:1px solid #555;border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:4px;font-family:inherit;color:white;font-size:13px;`;
+                    editor.innerHTML = `
+                        <div style="margin-bottom:2px;color:#3498db;font-weight:bold;">🔵 Mana</div>
+                        <div style="display:flex;gap:4px;align-items:center;">
+                            <span style="opacity:0.7;font-size:11px;">Atual</span>
+                            <input id="mana-current" type="number" value="${bar.current}" style="width:60px;background:#111;color:white;border:1px solid #444;padding:3px;border-radius:3px;">
+                        </div>
+                        <div style="display:flex;gap:4px;align-items:center;">
+                            <span style="opacity:0.7;font-size:11px;">Máx</span>
+                            <input id="mana-max" type="number" value="${bar.max}" style="width:60px;background:#111;color:white;border:1px solid #444;padding:3px;border-radius:3px;">
+                        </div>
+                        <div style="display:flex;gap:4px;margin-top:2px;">
+                            <button id="mana-confirm" style="flex:1;background:#3498db;color:white;border:none;padding:4px;border-radius:3px;cursor:pointer;">✔</button>
+                            <button id="mana-cancel"  style="flex:1;background:#333;color:white;border:none;padding:4px;border-radius:3px;cursor:pointer;">✖</button>
+                        </div>
+                    `;
+                    document.body.appendChild(editor);
+                    const cleanup = () => { if (editor.parentNode) document.body.removeChild(editor); };
+                    editor.querySelector("#mana-confirm").onclick = () => {
+                        token.bars.mana.current = parseFloat(editor.querySelector("#mana-current").value) || 0;
+                        token.bars.mana.max     = parseFloat(editor.querySelector("#mana-max").value)     || 0;
+                        token.bars.mana.enabled = token.bars.mana.max > 0;
+                        cleanup(); TokenPlugin.Canvas.draw();
+                    };
+                    editor.querySelector("#mana-cancel").onclick = cleanup;
+                    this.hide(); return;
+                }
+
+                // ---- ENTROPIA ----
+                if (action === "edit-entropy") {
+                    const bar    = token.bars.entropy;
+                    const editor = document.createElement("div");
+                    editor.style.cssText = `position:fixed;left:${this.menu.style.left};top:${this.menu.style.top};z-index:10000;background:#1e1e1e;border:1px solid #555;border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:4px;font-family:inherit;color:white;font-size:13px;`;
+                    editor.innerHTML = `
+                        <div style="margin-bottom:2px;color:#2ecc71;font-weight:bold;">💀 Entropia</div>
+                        <div style="display:flex;gap:4px;align-items:center;">
+                            <span style="opacity:0.7;font-size:11px;">Atual</span>
+                            <input id="entropy-current" type="number" value="${bar.current}" min="0" max="10" style="width:60px;background:#111;color:white;border:1px solid #444;padding:3px;border-radius:3px;">
+                        </div>
+                        <div style="display:flex;gap:4px;align-items:center;">
+                            <span style="opacity:0.7;font-size:11px;">Máx</span>
+                            <input id="entropy-max" type="number" value="10" disabled style="width:60px;background:#111;color:#666;border:1px solid #333;padding:3px;border-radius:3px;">
+                        </div>
+                        <div style="display:flex;gap:4px;margin-top:2px;">
+                            <button id="entropy-confirm" style="flex:1;background:#2ecc71;color:white;border:none;padding:4px;border-radius:3px;cursor:pointer;">✔</button>
+                            <button id="entropy-cancel"  style="flex:1;background:#333;color:white;border:none;padding:4px;border-radius:3px;cursor:pointer;">✖</button>
+                        </div>
+                    `;
+                    document.body.appendChild(editor);
+                    const cleanup = () => { if (editor.parentNode) document.body.removeChild(editor); };
+                    editor.querySelector("#entropy-confirm").onclick = () => {
+                        token.bars.entropy.current = Math.min(10, Math.max(0, parseFloat(editor.querySelector("#entropy-current").value) || 0));
+                        token.bars.entropy.max     = 10;
+                        token.bars.entropy.enabled = true;
+                        cleanup(); TokenPlugin.Canvas.draw();
+                    };
+                    editor.querySelector("#entropy-cancel").onclick = cleanup;
+                    this.hide(); return;
+                }
+
+                // ---- INICIATIVA ----
+                if (action === "edit-initiative") {
+                    if (!token.appearance.name) token.appearance.name = "Token #" + token.id;
+                    const editor = document.createElement("div");
+                    editor.style.cssText = `position:fixed;left:${this.menu.style.left};top:${this.menu.style.top};z-index:10000;background:#1e1e1e;border:1px solid #555;border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:4px;font-family:inherit;color:white;font-size:13px;`;
+                    editor.innerHTML = `
+                        <div style="margin-bottom:2px;color:#f1c40f;font-weight:bold;">🎲 Iniciativa</div>
+                        <div style="display:flex;gap:4px;align-items:center;">
+                            <span style="opacity:0.7;font-size:11px;">Valor</span>
+                            <input id="initiative-value" type="number" value="${token.initiative || 0}" style="width:60px;background:#111;color:white;border:1px solid #444;padding:3px;border-radius:3px;">
+                        </div>
+                        <div style="display:flex;gap:4px;margin-top:2px;">
+                            <button id="initiative-confirm" style="flex:1;background:#f1c40f;color:#111;border:none;padding:4px;border-radius:3px;cursor:pointer;font-weight:bold;">✔</button>
+                            <button id="initiative-cancel"  style="flex:1;background:#333;color:white;border:none;padding:4px;border-radius:3px;cursor:pointer;">✖</button>
+                        </div>
+                    `;
+                    document.body.appendChild(editor);
+                    const cleanup = () => { if (editor.parentNode) document.body.removeChild(editor); };
+                    editor.querySelector("#initiative-confirm").onclick = () => {
+                        token.initiative = parseFloat(editor.querySelector("#initiative-value").value) || 0;
+                        cleanup(); TokenPlugin.Canvas.draw(); TokenPlugin.Tracker.updateUI();
+                    };
+                    editor.querySelector("#initiative-cancel").onclick = cleanup;
+                    this.hide(); return;
+                }
+
+                // ---- ARMADURA ----
+                if (action === "edit-armor") {
+                    if (document.getElementById("armor-panel")) return;
+
+                    const regions  = [
+                        { key: "head",  label: "🗣️ Cabeça / Pescoço" },
+                        { key: "torso", label: "🫁 Tronco" },
+                        { key: "arms",  label: "💪 Membros Superiores" },
+                        { key: "legs",  label: "🦵 Membros Inferiores" }
+                    ];
+                    const dmgTypes = [
+                        { key: "cortante",    label: "Cortante" },
+                        { key: "contundente", label: "Contundente" },
+                        { key: "perfurante",  label: "Perfurante" }
+                    ];
+
+                    const panel = document.createElement("div");
+                    panel.id = "armor-panel";
+                    panel.style.cssText = `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10000;background:#1e1e1e;border:1px solid #555;border-radius:8px;padding:16px;width:620px;max-width:95vw;box-shadow:0 4px 20px rgba(0,0,0,0.7);font-family:inherit;color:white;font-size:13px;`;
+
+                    const header = document.createElement("div");
+                    header.style.cssText = "display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;";
+                    header.innerHTML = `
+                        <span style="font-size:15px;font-weight:bold;color:#aaa;">🛡️ ARMADURA — ${token.appearance?.name || "Token"}</span>
+                        <button id="armor-close" style="background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;">✕</button>
+                    `;
+                    panel.appendChild(header);
+
+                    const table = document.createElement("table");
+                    table.style.cssText = "width:100%;border-collapse:collapse;";
+                    const thead = document.createElement("thead");
+                    thead.innerHTML = `
+                        <tr>
+                            <th style="text-align:left;padding:6px 8px;color:#888;font-size:11px;text-transform:uppercase;border-bottom:1px solid #444;width:22%;">Região</th>
+                            <th style="padding:6px 8px;color:#e74c3c;font-size:11px;text-transform:uppercase;border-bottom:1px solid #444;">Cortante</th>
+                            <th style="padding:6px 8px;color:#3498db;font-size:11px;text-transform:uppercase;border-bottom:1px solid #444;">Contundente</th>
+                            <th style="padding:6px 8px;color:#2ecc71;font-size:11px;text-transform:uppercase;border-bottom:1px solid #444;">Perfurante</th>
+                        </tr>
+                    `;
+                    table.appendChild(thead);
+
+                    const tbody = document.createElement("tbody");
+                    regions.forEach((region, ri) => {
+                        const tr = document.createElement("tr");
+                        tr.style.cssText = ri % 2 === 0 ? "background:#252525;" : "background:#1e1e1e;";
+                        const tdRegion = document.createElement("td");
+                        tdRegion.style.cssText = "padding:8px;font-size:12px;color:#ccc;vertical-align:middle;";
+                        tdRegion.innerText = region.label;
+                        tr.appendChild(tdRegion);
+                        dmgTypes.forEach(dmg => {
+                            const cell = token.armor[region.key][dmg.key];
+                            const td   = document.createElement("td");
+                            td.style.cssText = "padding:6px 8px;vertical-align:middle;";
+                            td.innerHTML = `
+                                <div style="display:flex;flex-direction:column;gap:3px;align-items:center;">
+                                    <div style="display:flex;align-items:center;gap:4px;">
+                                        <span style="font-size:10px;color:#888;">Prot:</span>
+                                        <input type="number" data-region="${region.key}" data-dmg="${dmg.key}" data-field="prot" value="${cell.prot}"
+                                            style="width:48px;background:#111;color:white;border:1px solid #444;padding:3px;border-radius:3px;font-size:12px;text-align:center;">
+                                    </div>
+                                    <select data-region="${region.key}" data-dmg="${dmg.key}" data-field="mod"
+                                        style="width:100%;background:#111;color:white;border:1px solid #444;padding:3px;border-radius:3px;font-size:11px;">
+                                        <option value="normal"     ${cell.mod === "normal"     ? "selected" : ""}>Normal</option>
+                                        <option value="vulnerable" ${cell.mod === "vulnerable" ? "selected" : ""}>Vulnerável (×2)</option>
+                                        <option value="resistant"  ${cell.mod === "resistant"  ? "selected" : ""}>Resistente (×½)</option>
+                                    </select>
+                                </div>
+                            `;
+                            tr.appendChild(td);
+                        });
+                        tbody.appendChild(tr);
+                    });
+                    table.appendChild(tbody);
+                    panel.appendChild(table);
+
+                    const footer = document.createElement("div");
+                    footer.style.cssText = "display:flex;gap:8px;margin-top:14px;justify-content:flex-end;";
+                    const cancelBtn = document.createElement("button");
+                    cancelBtn.innerText = "✖ Cancelar";
+                    cancelBtn.style.cssText = "padding:7px 16px;background:#333;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;";
+                    const saveBtn = document.createElement("button");
+                    saveBtn.innerText = "✔ Salvar";
+                    saveBtn.style.cssText = "padding:7px 16px;background:#3a7a3a;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold;";
+                    footer.appendChild(cancelBtn);
+                    footer.appendChild(saveBtn);
+                    panel.appendChild(footer);
+                    document.body.appendChild(panel);
+
+                    const cleanup = () => { if (panel.parentNode) document.body.removeChild(panel); };
+                    document.getElementById("armor-close").onclick = cleanup;
+                    cancelBtn.onclick = cleanup;
+                    saveBtn.onclick = () => {
+                        panel.querySelectorAll("[data-region]").forEach(el => {
+                            const value = el.dataset.field === "prot" ? (parseFloat(el.value) || 0) : el.value;
+                            token.armor[el.dataset.region][el.dataset.dmg][el.dataset.field] = value;
+                        });
+                        cleanup();
+                        console.log("[ARMOR SAVED]", token.id, token.armor);
+                    };
+                    this.hide(); return;
+                }
+
+                // ---- RECEBER DANO ----
+                if (action === "receive-damage") {
+                    if (document.getElementById("damage-panel")) return;
+                    if (!token.bars?.hp?.enabled) {
+                        alert("Este token não possui vitalidade configurada.");
+                        return;
+                    }
+                    this._openDamagePanel(token);
+                    this.hide(); return;
+                }
+
+                // ---- ATACAR ----
+                if (action === "attack") {
+                    if (document.getElementById("attack-panel")) return;
+
+                    const panel = document.createElement("div");
+                    panel.id = "attack-panel";
+                    panel.style.cssText = `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10000;background:#1e1e1e;border:1px solid #555;border-radius:8px;padding:16px;width:300px;max-width:95vw;box-shadow:0 4px 20px rgba(0,0,0,0.7);font-family:inherit;color:white;font-size:13px;`;
+                    panel.innerHTML = `
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                            <span style="font-size:14px;font-weight:bold;color:#e74c3c;letter-spacing:1px;">🗡️ ALCANCE DO ATAQUE</span>
+                            <button id="attack-close" style="background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;line-height:1;">✕</button>
+                        </div>
+                        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;">
+                            <div style="background:#252525;border-radius:6px;padding:10px;">
+                                <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px;">
+                                    <input type="radio" name="atk-type" value="melee" checked style="accent-color:#e74c3c;width:14px;height:14px;">
+                                    <span style="font-size:13px;font-weight:bold;color:#eee;">Corpo a corpo</span>
+                                </label>
+                                <div id="melee-options" style="display:flex;flex-direction:column;gap:6px;padding-left:24px;">
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                        <input type="radio" name="atk-sub" value="short" checked style="accent-color:#e74c3c;width:12px;height:12px;">
+                                        <span style="font-size:12px;color:#ccc;">Curto / Médio <span style="color:#666;">(4 blocos em cruz)</span></span>
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                        <input type="radio" name="atk-sub" value="long" style="accent-color:#e74c3c;width:12px;height:12px;">
+                                        <span style="font-size:12px;color:#ccc;">Longo <span style="color:#666;">(8 blocos ao redor)</span></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div style="background:#252525;border-radius:6px;padding:10px;">
+                                <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px;">
+                                    <input type="radio" name="atk-type" value="ranged" style="accent-color:#e74c3c;width:14px;height:14px;">
+                                    <span style="font-size:13px;font-weight:bold;color:#eee;">À distância</span>
+                                </label>
+                                <div id="ranged-options" style="display:flex;flex-direction:column;gap:6px;padding-left:24px;opacity:0.4;pointer-events:none;">
+                                    <div style="display:flex;align-items:center;gap:8px;">
+                                        <span style="font-size:12px;color:#888;width:120px;">Alcance ideal (sq):</span>
+                                        <input id="atk-ideal" type="number" min="1" value="6" style="width:55px;background:#111;color:white;border:1px solid #444;padding:4px;border-radius:3px;text-align:center;font-size:12px;">
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:8px;">
+                                        <span style="font-size:12px;color:#888;width:120px;">Alcance máximo (sq):</span>
+                                        <input id="atk-max" type="number" min="1" value="12" style="width:55px;background:#111;color:white;border:1px solid #444;padding:4px;border-radius:3px;text-align:center;font-size:12px;">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:8px;justify-content:flex-end;">
+                            <button id="attack-cancel"  style="padding:7px 16px;background:#333;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:13px;">✖ Cancelar</button>
+                            <button id="attack-confirm" style="padding:7px 16px;background:#c0392b;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold;font-size:13px;">✔ Confirmar</button>
+                        </div>
+                    `;
+                    document.body.appendChild(panel);
+
+                    const cleanup = () => { if (panel.parentNode) document.body.removeChild(panel); };
+                    document.getElementById("attack-close").onclick  = cleanup;
+                    document.getElementById("attack-cancel").onclick = cleanup;
+
+                    panel.querySelectorAll("input[name='atk-type']").forEach(radio => {
+                        radio.addEventListener("change", () => {
+                            const isRanged = radio.value === "ranged";
+                            document.getElementById("melee-options").style.opacity       = isRanged ? "0.4" : "1";
+                            document.getElementById("melee-options").style.pointerEvents = isRanged ? "none" : "auto";
+                            document.getElementById("ranged-options").style.opacity       = isRanged ? "1" : "0.4";
+                            document.getElementById("ranged-options").style.pointerEvents = isRanged ? "auto" : "none";
+                        });
+                    });
+
+                    document.getElementById("attack-confirm").onclick = () => {
+                        const type   = panel.querySelector("input[name='atk-type']:checked").value;
+                        const config = { type };
+                        if (type === "melee") config.subtype = panel.querySelector("input[name='atk-sub']:checked").value;
+                        else {
+                            config.idealRange = parseFloat(document.getElementById("atk-ideal").value) || 6;
+                            config.maxRange   = parseFloat(document.getElementById("atk-max").value)   || 12;
+                        }
+                        cleanup();
+                        TokenPlugin.Control.startAttack(token.id, config);
+                    };
+                    this.hide(); return;
+                }
+
+                // ---- NOTAS ----
+                if (action === "notes") {
+                    if (document.getElementById("notes-panel")) return;
+
+                    const panel = document.createElement("div");
+                    panel.id = "notes-panel";
+                    panel.style.cssText = `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10000;background:#1e1e1e;border:1px solid #555;border-radius:8px;padding:16px;width:320px;max-width:95vw;box-shadow:0 4px 20px rgba(0,0,0,0.7);font-family:inherit;color:white;font-size:13px;display:flex;flex-direction:column;gap:10px;`;
+                    panel.innerHTML = `
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <span style="font-size:14px;font-weight:bold;color:#f1c40f;">📝 NOTAS — ${token.appearance?.name || "Token"}</span>
+                            <button id="notes-close" style="background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;line-height:1;">✕</button>
+                        </div>
+                        <textarea id="notes-text"
+                            placeholder="Ex: sem o braço esquerdo, congelado, trocar figura ao morrer..."
+                            style="width:100%;min-height:120px;background:#111;color:#eee;border:1px solid #444;border-radius:4px;padding:8px;font-family:inherit;font-size:13px;resize:vertical;box-sizing:border-box;line-height:1.5;"
+                        >${token.notes || ""}</textarea>
+                        <div style="display:flex;gap:8px;justify-content:flex-end;">
+                            <button id="notes-cancel" style="padding:7px 16px;background:#333;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;">✖ Cancelar</button>
+                            <button id="notes-save"   style="padding:7px 16px;background:#b8860b;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">✔ Salvar</button>
+                        </div>
+                    `;
+                    document.body.appendChild(panel);
+
+                    const cleanup = () => { if (panel.parentNode) document.body.removeChild(panel); };
+                    document.getElementById("notes-close").onclick  = cleanup;
+                    document.getElementById("notes-cancel").onclick = cleanup;
+                    document.getElementById("notes-save").onclick   = () => {
+                        token.notes = document.getElementById("notes-text").value;
+                        console.log("[NOTES SAVED]", token.id, token.notes);
+                        cleanup();
+                    };
+
+                    setTimeout(() => {
+                        const ta = document.getElementById("notes-text");
+                        if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+                    }, 50);
+
+                    this.hide(); return;
+                }
+
+                // fallback
+                TokenPlugin.Canvas.draw();
+                this.hide();
+            });
+
+            document.addEventListener("click", (e) => {
+                if (this.menu.style.display === "block" && !this.menu.contains(e.target)) {
+                    this.hide();
+                }
+            });
+        },
+
+        show(x, y, tokenId) {
+            this.currentTokenId = tokenId;
+            this.menu.style.left = "0px";
+            this.menu.style.top  = "0px";
+            this.menu.style.display = "block";
+
+            const menuW   = this.menu.offsetWidth;
+            const menuH   = this.menu.offsetHeight;
+            const screenW = window.innerWidth;
+            const screenH = window.innerHeight;
+
+            this.menu.style.left = ((x + menuW > screenW) ? screenW - menuW - 8 : x) + "px";
+            this.menu.style.top  = ((y + menuH > screenH) ? screenH - menuH - 8 : y) + "px";
+        },
+
+        hide() {
+            this.menu.style.display = "none";
+            this.currentTokenId     = null;
+        },
+
+        // chamado também pelo token-control no modo ataque
+        openDamagePanel(token) {
+            this._openDamagePanel(token);
+        },
+
+        _openDamagePanel(token) {
+            if (document.getElementById("damage-panel")) return;
+
+            const panel = document.createElement("div");
+            panel.id = "damage-panel";
+            panel.style.cssText = `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10000;background:#1e1e1e;border:1px solid #555;border-radius:8px;padding:16px;width:320px;max-width:95vw;box-shadow:0 4px 20px rgba(0,0,0,0.7);font-family:inherit;color:white;font-size:13px;`;
+            panel.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                    <span style="font-size:15px;font-weight:bold;color:#e74c3c;">⚔️ RECEBER DANO — ${token.appearance?.name || "Token"}</span>
+                    <button id="damage-close" style="background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;">✕</button>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="width:80px;color:#888;font-size:12px;">Valor:</span>
+                        <input id="dmg-value" type="number" min="0" value="0" style="flex:1;background:#111;color:white;border:1px solid #444;padding:5px;border-radius:3px;font-size:14px;text-align:center;">
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="width:80px;color:#888;font-size:12px;">Tipo:</span>
+                        <select id="dmg-type" style="flex:1;background:#111;color:white;border:1px solid #444;padding:5px;border-radius:3px;">
+                            <option value="cortante">Cortante</option>
+                            <option value="contundente">Contundente</option>
+                            <option value="perfurante">Perfurante</option>
+                        </select>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="width:80px;color:#888;font-size:12px;">Local:</span>
+                        <select id="dmg-region" style="flex:1;background:#111;color:white;border:1px solid #444;padding:5px;border-radius:3px;">
+                            <option value="head">Cabeça / Pescoço</option>
+                            <option value="torso">Tronco</option>
+                            <option value="arms">Membros Superiores</option>
+                            <option value="legs">Membros Inferiores</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="dmg-calc" style="background:#252525;border-radius:6px;padding:10px;margin-bottom:14px;font-size:12px;line-height:2;"></div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;">
+                    <button id="dmg-cancel" style="padding:7px 16px;background:#333;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;">✖ Cancelar</button>
+                    <button id="dmg-apply"  style="padding:7px 16px;background:#c0392b;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">✔ Aplicar</button>
+                </div>
+            `;
+            document.body.appendChild(panel);
+
+            const cleanup = () => { if (panel.parentNode) document.body.removeChild(panel); };
+            document.getElementById("damage-close").onclick = cleanup;
+            document.getElementById("dmg-cancel").onclick   = cleanup;
+
+            const calcDamage = () => {
+                const raw        = parseFloat(document.getElementById("dmg-value").value)  || 0;
+                const type       = document.getElementById("dmg-type").value;
+                const region     = document.getElementById("dmg-region").value;
+                const cell       = token.armor?.[region]?.[type];
+                const prot       = cell?.prot || 0;
+                const mod        = cell?.mod  || "normal";
+                const afterArmor = Math.max(0, raw - prot);
+                let multiplier = 1, modLabel = "Normal ×1";
+                if (mod === "vulnerable") { multiplier = 2;   modLabel = "Vulnerável ×2"; }
+                if (mod === "resistant")  { multiplier = 0.5; modLabel = "Resistente ×½"; }
+                const final       = Math.ceil(afterArmor * multiplier);
+                const hpNow       = token.bars.hp.current;
+                const hpNext      = Math.max(0, hpNow - final);
+                const regionLabel = document.getElementById("dmg-region").options[document.getElementById("dmg-region").selectedIndex].text;
+                document.getElementById("dmg-calc").innerHTML = `
+                    <div style="display:flex;justify-content:space-between;"><span style="color:#888;">Dano bruto:</span><span>${raw}</span></div>
+                    <div style="display:flex;justify-content:space-between;"><span style="color:#888;">Proteção (${regionLabel}):</span><span style="color:#3498db;">-${prot}</span></div>
+                    <div style="display:flex;justify-content:space-between;"><span style="color:#888;">Após armadura:</span><span>${afterArmor}</span></div>
+                    <div style="display:flex;justify-content:space-between;"><span style="color:#888;">Modificador:</span><span style="color:${mod==="vulnerable"?"#e74c3c":mod==="resistant"?"#2ecc71":"#aaa"};">${modLabel}</span></div>
+                    <div style="display:flex;justify-content:space-between;border-top:1px solid #444;margin-top:4px;padding-top:4px;">
+                        <span style="color:#fff;font-weight:bold;">Dano final:</span>
+                        <span style="color:#e74c3c;font-weight:bold;">${final}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;margin-top:2px;">
+                        <span style="color:#888;">HP:</span>
+                        <span>${hpNow} → <span style="color:${hpNext===0?"#e74c3c":"#2ecc71"};font-weight:bold;">${hpNext}</span></span>
+                    </div>
+                `;
+                return { final, hpNext };
+            };
+
+            ["dmg-value", "dmg-type", "dmg-region"].forEach(id => {
+                document.getElementById(id).addEventListener("input",  calcDamage);
+                document.getElementById(id).addEventListener("change", calcDamage);
+            });
+            calcDamage();
+
+            document.getElementById("dmg-apply").onclick = () => {
+                const { final, hpNext } = calcDamage();
+                token.bars.hp.current = hpNext;
+                console.log("[DAMAGE APPLIED]", token.id, "dano:", final, "hp:", hpNext);
+                cleanup(); TokenPlugin.Canvas.draw();
+            };
+        }
+    };
+
+    // =============================================
+    // FUNÇÕES INTERNAS DA IIFE
+    // =============================================
+
+    function injectTokenUI() {
+        const sidebar = document.getElementById("sidebar");
+        if (!sidebar) return;
+
+        const category = document.createElement("div");
+        category.className = "category";
+
+        const title = document.createElement("div");
+        title.className = "category-title";
+        title.innerText = "Tokens";
+        category.appendChild(title);
+
+        const group = document.createElement("div");
+        group.className = "control-group";
+
+        const btn = document.createElement("button");
+        btn.id = "token-toggle-btn";
+        btn.innerText = "🎲 ATIVAR TOKENS";
+        btn.style.cssText = "width:100%;padding:8px;margin-top:4px;border:1px solid #555;background:#2f2f2f;color:white;cursor:pointer;font-family:Cinzel,serif;letter-spacing:1px;transition:all 0.15s ease;";
+
+        btn.onclick = () => {
+            const canvas = TokenPlugin.Canvas.canvas;
+            if (!canvas) return;
+
+            if (VTTMode.is("tokens")) {
+                VTTMode.set("measure");
+                canvas.style.pointerEvents = "none";
+                btn.innerText = "🎲 ATIVAR TOKENS";
+                btn.style.background = "#2f2f2f";
+            } else {
+                VTTMode.set("tokens");
+                canvas.style.pointerEvents = "auto";
+                btn.innerText = "✅ TOKENS ATIVOS";
+                btn.style.background = "#3a7a3a";
+                TokenPlugin.Canvas.draw();
+            }
+        };
+
+        group.appendChild(btn);
+
+        const folderInput = document.createElement("input");
+        folderInput.id = "token-folder-id";
+        folderInput.placeholder = "ID da pasta do Drive";
+        const savedTokenFolder = JSON.parse(localStorage.getItem('vtt_minardi_v1') || '{}').tokenFolderId || "";
+        folderInput.value = savedTokenFolder;
+        folderInput.style.cssText = "width:100%;margin-top:6px;padding:6px;background:#1a1a1a;color:white;border:1px solid #555;";
+
+        const loadBtn = document.createElement("button");
+        loadBtn.innerText = "📂 Carregar Tokens";
+        loadBtn.style.cssText = "width:100%;margin-top:4px;padding:6px;background:#444;color:white;border:1px solid #555;cursor:pointer;";
+
+        const gallery = document.createElement("div");
+        gallery.style.cssText = "margin-top:6px;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-height:200px;overflow-y:auto;";
+
+        loadBtn.onclick = () => {
+            const id = folderInput.value.trim();
+            if (!id) return alert("Informe o ID da pasta.");
+            google.script.run
+                .withSuccessHandler(files => {
+                    if (!files || !files.length) { alert("Nenhuma imagem encontrada."); return; }
+                    TokenPlugin.Model.setImageLibrary(files);
+                    renderGallery(files);
+                })
+                .getTokenImagesFromDrive(id);
+        };
+
+        function renderGallery(files) {
+            gallery.innerHTML = "";
+            files.forEach(file => {
+                const img = document.createElement("img");
+                img.src = file.dataUrl;
+                img.style.cssText = "width:100%;cursor:pointer;border:2px solid transparent;border-radius:4px;";
+                img.draggable = true;
+                img.addEventListener("dragstart", (e) => {
+                    e.dataTransfer.setData("token-image", file.dataUrl);
+                });
+                img.onclick = () => {
+                    const selected = TokenPlugin.Model.getSelected()[0];
+                    if (!selected) { alert("Selecione um token primeiro."); return; }
+                    selected.appearance.image = file.dataUrl;
+                    TokenPlugin.Canvas.draw();
+                };
+                gallery.appendChild(img);
+            });
+        }
+
+        group.appendChild(folderInput);
+        group.appendChild(loadBtn);
+        group.appendChild(gallery);
+        category.appendChild(group);
+        sidebar.appendChild(category);
+
+        // === SEÇÃO TRACKER ===
+        const trackerCategory = document.createElement("div");
+        trackerCategory.className = "category";
+        trackerCategory.id = "tracker-section";
+        trackerCategory.style.display = "none";
+
+        const trackerTitle = document.createElement("div");
+        trackerTitle.className = "category-title";
+        trackerTitle.innerText = "Ordem de Combate";
+        trackerCategory.appendChild(trackerTitle);
+
+        const counter = document.createElement("div");
+        counter.id = "tracker-counter";
+        counter.style.cssText = "font-size:12px;color:#aaa;margin-bottom:8px;text-align:center;";
+        counter.innerText = "Sem combate ativo";
+        trackerCategory.appendChild(counter);
+
+        const controls = document.createElement("div");
+        controls.style.cssText = "display:flex;gap:4px;margin-bottom:8px;";
+
+        const prevBtn = document.createElement("button");
+        prevBtn.innerText = "⏮";
+        prevBtn.style.cssText = "flex:1;padding:6px;background:#333;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:16px;";
+        prevBtn.onclick = () => TokenPlugin.Tracker.prev();
+
+        const playBtn = document.createElement("button");
+        playBtn.id = "tracker-play";
+        playBtn.innerText = "▶";
+        playBtn.style.cssText = "flex:1;padding:6px;background:#3a7a3a;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:16px;";
+        playBtn.onclick = () => {
+            if (TokenPlugin.Tracker.playing) TokenPlugin.Tracker.pause();
+            else TokenPlugin.Tracker.start();
+        };
+
+        const nextBtn = document.createElement("button");
+        nextBtn.innerText = "⏭";
+        nextBtn.style.cssText = "flex:1;padding:6px;background:#333;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:16px;";
+        nextBtn.onclick = () => TokenPlugin.Tracker.next();
+
+        const resetBtn = document.createElement("button");
+        resetBtn.innerText = "⏹";
+        resetBtn.style.cssText = "flex:1;padding:6px;background:#7a3a3a;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:16px;";
+        resetBtn.onclick = () => {
+            if (confirm("Zerar o combate? Os valores de iniciativa serão apagados.")) {
+                TokenPlugin.Tracker.reset();
+            }
+        };
+
+        controls.appendChild(prevBtn);
+        controls.appendChild(playBtn);
+        controls.appendChild(nextBtn);
+        controls.appendChild(resetBtn);
+        trackerCategory.appendChild(controls);
+
+        const listEl = document.createElement("div");
+        listEl.id = "tracker-list";
+        listEl.style.cssText = "display:flex;flex-direction:column;";
+        trackerCategory.appendChild(listEl);
+
+        sidebar.appendChild(trackerCategory);
+
+        setInterval(() => {
+            const visible = VTTMode?.is("tokens");
+            trackerCategory.style.display = visible ? "block" : "none";
+        }, 200);
+    }
+
+    function startTokenObserver() {
+        if (tokenObserverInterval) return;
+        tokenObserverInterval = setInterval(() => {
+            if (!VTTMode?.is || !VTTMode.is("tokens")) return;
+            const tokens    = TokenPlugin.Model.all();
+            const signature = JSON.stringify(tokens.map(t => ({
+                id: t.id, gx: t.gx, gy: t.gy, cells: t.cells,
+                name: t.appearance?.name, image: t.appearance?.image
+            })));
+            if (signature !== lastTokenSignature) {
+                lastTokenSignature = signature;
+                TokenPlugin.Canvas.draw();
+            }
+        }, 100);
+    }
+
+    function enableMapDrop() {
+        const map = document.getElementById("map-container");
+        if (!map) return;
+
+        map.addEventListener("dragover", (e) => {
+            if (!VTTMode.is("tokens")) return;
+            e.preventDefault();
+        });
+
+        map.addEventListener("drop", (e) => {
+            if (!VTTMode.is("tokens")) return;
+            e.preventDefault();
+            const image = e.dataTransfer.getData("token-image");
+            if (!image) return;
+            const pos   = TokenPlugin.Control.mouseToGrid(e);
+            const token = TokenPlugin.Model.create(pos.gx, pos.gy);
+            token.appearance.image = image;
+            TokenPlugin.Model.selectOnly(token.id);
+            TokenPlugin.Canvas.draw();
+        });
+    }
+
+})();
+</script>

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&display=swap" rel="stylesheet">
+    <meta charset="UTF-8">
+    <title>Minardi VTT</title>
+    <?!= include('style'); ?>
+    <?!= include('token-main'); ?>
+    <?!= include('token-model'); ?>
+    <?!= include('token-canvas'); ?>
+    <?!= include('token-control'); ?>
+    <?!= include('token-ui'); ?>
+<?!= include('audio-model'); ?>
+<?!= include('audio-drive'); ?>
+<?!= include('audio-player'); ?>
+<?!= include('audio-control'); ?>
+<?!= include('audio-ui'); ?>
+<?!= include('audio-main'); ?>
+<?!= include('light-model'); ?>
+<?!= include('light-raycast'); ?>
+<?!= include('light-canvas'); ?>
+<?!= include('light-fog'); ?>
+<?!= include('light-wall'); ?>
+<?!= include('light-control'); ?>
+<?!= include('light-ui'); ?>
+<?!= include('light-main'); ?>
+
+</head>
+<body oncontextmenu="return false;">
+
+    <button class="toggle-btn" onclick="toggleSidebar()">⚙️</button>
+
+    <div id="sidebar" class="right">
+        <div style="min-width: 100%;">
+            <h1 style="margin: 0 0 10px 0; color:var(--accent-color); font-size: 1.4em;">Minardi VTT</h1>
+            <div style="display: flex; gap: 5px; margin-bottom: 15px;">
+                <button class="btn-full" onclick="toggleFullscreen()">TELA CHEIA</button>
+                <button class="btn-full btn-save" onclick="saveSession()">SALVAR</button>
+            </div>
+        </div>
+
+        <div class="category">
+            <div class="category-title">Aparência e Menu</div>
+            <div class="control-group">
+                <label>Tema:</label>
+                <select onchange="toggleTheme(this.value)">
+                    <option value="dark">Modo Escuro</option>
+                    <option value="light">Modo Claro</option>
+                    <option value="rustic">Modo Rústico</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Posição do Menu:</label>
+                <select onchange="changeSidebarPos(this.value)">
+                    <option value="right">Direita</option>
+                    <option value="left">Esquerda</option>
+                    <option value="top">Topo</option>
+                    <option value="bottom">Base</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="category">
+            <div class="category-title">Arquivos</div>
+            <div class="control-group">
+                <label>ID Pasta Drive:</label>
+                <input type="text" id="folder-id">
+                <button class="btn-full" style="background:#444" onclick="connectDrive()">Conectar</button>
+                <div id="drive-library" class="drive-list"></div>
+            </div>
+            <div id="video-controls" style="display:none;">
+                <button class="btn-full" id="play-pause-btn" onclick="toggleVideoPlayback()">⏸ PAUSAR</button>
+            </div>
+        </div>
+
+        <div class="category">
+            <div class="category-title">Ferramentas de Grid</div>
+            <div class="control-group">
+                <label>Ferramenta:</label>
+                <select id="tool-mode" onchange="toggleToolParams()">
+                    <option value="line">Régua</option>
+                    <option value="circle">Raio</option>
+                    <option value="cone">Cone</option>
+                </select>
+                <div id="cone-params" style="display:none; margin-top:5px;">
+                    <input type="number" id="cone-angle" value="60" step="5" placeholder="Ângulo">
+                </div>
+            </div>
+            <div class="control-group">
+                <label>Escala (m/sq):</label>
+                <input type="number" id="scale-ratio" value="1.5" step="0.1">
+            </div>
+            <div class="control-group">
+                <label>Grid (cm / cor):</label>
+                <div style="display:flex; gap:5px;">
+                    <input type="number" id="grid-cm" value="2.5" step="0.1" onchange="drawGrid()">
+                    <input type="color" id="grid-color" value="#ffffff" oninput="drawGrid()">
+                </div>
+            </div>
+            <input type="range" id="grid-opacity" min="0" max="1" step="0.05" value="0.4" oninput="drawGrid()">
+        </div>
+
+        <div class="category">
+    <div class="category-title">Monitor</div>
+    <div class="control-group">
+        <label>Enquadramento:</label>
+        <select id="map-fit" onchange="updateMapSize()">
+            <option value="original">Original</option>
+            <option value="width">Largura</option>
+            <option value="height">Altura</option>
+            <option value="stretch">Esticar</option>
+        </select>
+    </div>
+    <div class="control-group">
+        <label>Polegadas:</label>
+        <input type="number" id="screen-inches" value="24" step="0.1" onchange="updateCalibration()">
+    </div>
+    <div class="control-group" style="margin-top: 10px;">
+        <label>Ajustar Mapa: <span id="map-scale-display">+0%</span></label>
+        <div style="display:flex; gap:6px; align-items:center;">
+            <input type="range" id="map-scale" min="-100" max="100" step="1" value="0"
+                style="flex:1;"
+                oninput="document.getElementById('map-scale-display').textContent=(this.value>=0?'+':'')+this.value+'%'; document.getElementById('map-scale-number').value=this.value;"
+                onchange="applyMapScale(parseInt(this.value))">
+            <input type="number" id="map-scale-number" min="-100" max="100" value="0"
+                style="width:54px; padding:4px; text-align:center;"
+                onchange="applyMapScale(Math.min(100,Math.max(-100,parseInt(this.value)||0)))">
+        </div>
+        <button class="btn-full" style="margin-top:6px; background:#555; font-size:0.65em;"
+            onclick="applyMapScale(0)">↺ Resetar Escala</button>
+    </div>
+</div>
+    </div>
+
+    <div id="main-wrapper">
+        <div id="map-container" onmousedown="startMeasure(event)" onmousemove="updateMeasure(event)" onmouseup="stopMeasure()">
+            <img id="map-image" src="" style="display: none;">
+            <video id="map-video" autoplay loop muted playsinline style="display: none;"></video>
+            <canvas id="grid-canvas"></canvas>
+            <canvas id="ui-canvas"></canvas>
+        </div>
+    </div>
+
+    <?!= include('javascript'); ?>
+    
+</body>
+</html>

@@ -1,0 +1,176 @@
+<script>
+// ============================================================
+// MINARDI VTT — LightPlugin
+// light-model.html — Fonte da verdade
+// ============================================================
+
+console.log("light-model carregado");
+
+window.LightPlugin = window.LightPlugin || {};
+
+LightPlugin.Model = {
+
+  // ---- Objetos de escuridão ----
+  // { id, name, type:"rect"|"circle", x, y, w, h, r, behavior:"eternal"|"temporary" }
+  darknessObjects: [],
+
+  // ---- Objetos de luz ----
+  // { id, name, type:"rect"|"circle"|"source",
+  //   x, y, w, h, r,
+  //   lightType:"cut"|"source",
+  //   lightRadius, dimRadius  (em quadrados, convertido para px em runtime)
+  //   tokenId: null | id      (se associado a token)
+  // }
+  lightObjects: [],
+
+  // ---- Paredes ----
+  // { id, name, points:[{x,y},{x,y},...] }
+  wallObjects: [],
+
+  // ---- Configurações globais ----
+  settings: {
+    enabled:      false,
+    masterReveal: false,   // mestre vê tudo
+    showWalls:    true,    // exibe linhas de parede
+    fogOpacity:   0.92,
+    dimOpacity:   0.45,
+  },
+
+  _nextId: 1,
+
+  // ============================================================
+
+  init() {
+    console.log("LightPlugin.Model INIT");
+    this._load();
+  },
+
+  // ---- IDs ----
+  _id() { return this._nextId++; },
+
+  // ---- ESCURIDÃO ----
+
+  addDarkness(props) {
+    const obj = Object.assign({ id: this._id(), name: "Escuridão " + this._nextId, behavior: "eternal" }, props);
+    this.darknessObjects.push(obj);
+    this._save(); return obj;
+  },
+
+  removeDarkness(id) {
+    this.darknessObjects = this.darknessObjects.filter(o => o.id !== id);
+    this._save();
+  },
+
+  updateDarkness(id, props) {
+    const o = this.darknessObjects.find(o => o.id === id);
+    if (o) { Object.assign(o, props); this._save(); }
+  },
+
+  // ---- LUZ ----
+
+  addLight(props) {
+    const obj = Object.assign({
+      id: this._id(), name: "Luz " + this._nextId,
+      lightType: "source", lightRadius: 6, dimRadius: 12, tokenId: null
+    }, props);
+    this.lightObjects.push(obj);
+    this._save(); return obj;
+  },
+
+  removeLight(id) {
+    this.lightObjects = this.lightObjects.filter(o => o.id !== id);
+    this._save();
+  },
+
+  updateLight(id, props) {
+    const o = this.lightObjects.find(o => o.id === id);
+    if (o) { Object.assign(o, props); this._save(); }
+  },
+
+  // ---- PAREDES ----
+
+  addWall(points, name) {
+    const obj = { id: this._id(), name: name || ("Parede " + this._nextId), points };
+    this.wallObjects.push(obj);
+    this._save(); return obj;
+  },
+
+  removeWall(id) {
+    this.wallObjects = this.wallObjects.filter(w => w.id !== id);
+    this._save();
+  },
+
+  updateWallPoint(wallId, pointIndex, x, y) {
+    const w = this.wallObjects.find(w => w.id === wallId);
+    if (w && w.points[pointIndex]) {
+      w.points[pointIndex] = { x, y };
+      this._save();
+    }
+  },
+
+  // ---- TOKENS COM LUZ ----
+  // Retorna lista de fontes de luz sintéticas baseadas nos tokens
+  getTokenLightSources() {
+    if (!window.TokenPlugin?.Model) return [];
+    const size = window.VTTGrid?.size || 50;
+    return TokenPlugin.Model.all()
+      .filter(t => t.light?.enabled)
+      .map(t => ({
+        id:          "token_" + t.id,
+        name:        (t.appearance?.name || "Token") + " (luz)",
+        lightRadius: (t.light.radius    || 6)  * size,
+        dimRadius:   (t.light.dimRadius || 12) * size,
+        x: t.gx * size + (t.cells * size) / 2,
+        y: t.gy * size + (t.cells * size) / 2,
+        tokenId: t.id
+      }));
+  },
+
+  // ---- PERSISTÊNCIA ----
+
+  _save() {
+    try {
+      localStorage.setItem("vtt_light_v2", JSON.stringify({
+        darknessObjects: this.darknessObjects,
+        lightObjects:    this.lightObjects,
+        wallObjects:     this.wallObjects,
+        settings:        this.settings,
+        _nextId:         this._nextId
+      }));
+    } catch(e) {}
+  },
+
+  _load() {
+    try {
+      const raw = localStorage.getItem("vtt_light_v2");
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (d.darknessObjects) this.darknessObjects = d.darknessObjects;
+      if (d.lightObjects)    this.lightObjects    = d.lightObjects;
+      if (d.wallObjects)     this.wallObjects     = d.wallObjects;
+      if (d.settings)        Object.assign(this.settings, d.settings);
+      if (d._nextId)         this._nextId         = d._nextId;
+    } catch(e) { console.warn("LightPlugin.Model: erro ao carregar", e); }
+  },
+
+  exportForSave() {
+    return {
+      darknessObjects: this.darknessObjects,
+      lightObjects:    this.lightObjects,
+      wallObjects:     this.wallObjects,
+      settings:        this.settings,
+      _nextId:         this._nextId
+    };
+  },
+
+  importFromSave(d) {
+    if (!d) return;
+    if (d.darknessObjects) this.darknessObjects = d.darknessObjects;
+    if (d.lightObjects)    this.lightObjects    = d.lightObjects;
+    if (d.wallObjects)     this.wallObjects     = d.wallObjects;
+    if (d.settings)        Object.assign(this.settings, d.settings);
+    if (d._nextId)         this._nextId         = d._nextId;
+    this._save();
+  }
+};
+</script>

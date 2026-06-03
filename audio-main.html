@@ -1,0 +1,32 @@
+<script>
+// ============================================================
+// MINARDI VTT — AudioPlugin
+// audio-main.html — Boot do sistema de áudio
+// ============================================================
+
+console.log("audio-main carregado");
+
+window.AudioPlugin = window.AudioPlugin || {};
+
+AudioPlugin.boot = function() {
+  _waitForDOM(function() {
+    AudioPlugin.Model.init();
+    AudioPlugin.Drive.init();
+    AudioPlugin.Player.init();
+    AudioPlugin.Control.init();
+    AudioPlugin.UI.init();
+    console.log("AudioPlugin: todos os módulos inicializados.");
+  });
+};
+
+function _waitForDOM(cb) {
+  var t = setInterval(function() {
+    if (document.getElementById("sidebar") && window.VTTMode) {
+      clearInterval(t);
+      cb();
+    }
+  }, 100);
+}
+
+AudioPlugin.boot();
+</script>

@@ -1,0 +1,451 @@
+<script>
+console.log("token-model carregado");
+
+TokenPlugin.Model = {
+
+    clipboard: [],
+    tokens: [],
+    nextId: 1,
+    selected: new Set(),
+
+    // =========================
+    // BIBLIOTECA DE IMAGENS (Drive)
+    // =========================
+    imageLibrary: [],
+
+    setImageLibrary(images) {
+        this.imageLibrary = images || [];
+        console.log("Biblioteca de tokens carregada:", this.imageLibrary.length);
+    },
+
+    getImageLibrary() {
+        return this.imageLibrary;
+    },
+
+    init() {
+        console.log("TokenModel INIT");
+    },
+
+    create(gx, gy) {
+        const t = this._buildToken({ gx, gy, cells: 1 });
+        this.tokens.push(t);
+        return t;
+    },
+
+    _buildToken(data) {
+        return {
+            id: this.nextId++,
+
+            gx: data.gx,
+            gy: data.gy,
+            cells: data.cells || 1,
+
+            appearance: {
+                image: data.image || null,
+                color: data.color || "red",
+                name: data.name || null
+            },
+
+            stats: {},
+            effects: { ringColor: null },
+
+            light: {
+                enabled: false,
+                radius: 0,
+                dimRadius: 0
+            },
+
+            bars: {
+                hp:      { enabled: false, current: 0, max: 0 },
+                mana:    { enabled: false, current: 0, max: 0 },
+                entropy: { enabled: false, current: 0, max: 0 }
+            },
+
+            initiative: null,
+
+notes: data.notes || "",
+
+            armor: {
+                head:  { cortante: {prot:0, mod:"normal"}, contundente: {prot:0, mod:"normal"}, perfurante: {prot:0, mod:"normal"} },
+                torso: { cortante: {prot:0, mod:"normal"}, contundente: {prot:0, mod:"normal"}, perfurante: {prot:0, mod:"normal"} },
+                arms:  { cortante: {prot:0, mod:"normal"}, contundente: {prot:0, mod:"normal"}, perfurante: {prot:0, mod:"normal"} },
+                legs:  { cortante: {prot:0, mod:"normal"}, contundente: {prot:0, mod:"normal"}, perfurante: {prot:0, mod:"normal"} }
+            }
+        };
+    },
+
+    all() { return this.tokens; },
+
+    clearSelection() { this.selected.clear(); },
+
+    selectOnly(id) {
+        this.selected.clear();
+        this.selected.add(id);
+    },
+
+    addToSelection(id) {
+        this.selected.add(id);
+    },
+
+    isSelected(id) {
+        return this.selected.has(id);
+    },
+
+    getSelected() {
+        return this.tokens.filter(t => this.selected.has(t.id));
+    },
+
+    selectInRect(x1, y1, x2, y2, size) {
+        this.selected.clear();
+
+        const minX = Math.min(x1, x2);
+        const maxX = Math.max(x1, x2);
+        const minY = Math.min(y1, y2);
+        const maxY = Math.max(y1, y2);
+
+        this.tokens.forEach(t => {
+            const cx = (t.gx * size) + (t.cells * size) / 2;
+            const cy = (t.gy * size) + (t.cells * size) / 2;
+
+            if (cx >= minX && cx <= maxX && cy >= minY && cy <= maxY) {
+                this.selected.add(t.id);
+            }
+        });
+    },
+
+    deleteSelected() {
+        this.tokens = this.tokens.filter(t => !this.selected.has(t.id));
+        this.selected.clear();
+    },
+
+    selectAll() {
+        this.tokens.forEach(t => this.selected.add(t.id));
+    },
+
+    copySelected() {
+        const selected = this.getSelected();
+        if (!selected.length) return;
+
+        this.clipboard = selected.map(t => ({
+            gx: t.gx,
+            gy: t.gy,
+            cells: t.cells,
+            appearance: {
+                image: t.appearance.image,
+                color: t.appearance.color,
+                name: t.appearance.name
+            },
+            bars: {
+                hp:      { ...t.bars.hp },
+                mana:    { ...t.bars.mana },
+                entropy: { ...t.bars.entropy }
+            },
+            armor: {
+                head:  { cortante: {...t.armor.head.cortante},  contundente: {...t.armor.head.contundente},  perfurante: {...t.armor.head.perfurante}  },
+                torso: { cortante: {...t.armor.torso.cortante}, contundente: {...t.armor.torso.contundente}, perfurante: {...t.armor.torso.perfurante} },
+                arms:  { cortante: {...t.armor.arms.cortante},  contundente: {...t.armor.arms.contundente},  perfurante: {...t.armor.arms.perfurante}  },
+                legs:  { cortante: {...t.armor.legs.cortante},  contundente: {...t.armor.legs.contundente},  perfurante: {...t.armor.legs.perfurante}  }
+            },
+            initiative: t.initiative,
+notes: t.notes || ""
+        }));
+    },
+
+    pasteClipboard(offsetX = 1, offsetY = 1) {
+        if (!this.clipboard.length) return;
+
+        this.selected.clear();
+
+        this.clipboard.forEach(data => {
+            const newToken = this._buildToken({
+                gx: data.gx + offsetX,
+                gy: data.gy + offsetY,
+                cells: data.cells,
+                image: data.appearance?.image || null,
+                color: data.appearance?.color || "red",
+                name: data.appearance?.name || null
+            });
+
+            // copia dados extras
+            if (data.bars) {
+                newToken.bars.hp      = { ...data.bars.hp };
+                newToken.bars.mana    = { ...data.bars.mana };
+                newToken.bars.entropy = { ...data.bars.entropy };
+            }
+
+            if (data.armor) {
+                newToken.armor.head  = { cortante: {...data.armor.head.cortante},  contundente: {...data.armor.head.contundente},  perfurante: {...data.armor.head.perfurante}  };
+                newToken.armor.torso = { cortante: {...data.armor.torso.cortante}, contundente: {...data.armor.torso.contundente}, perfurante: {...data.armor.torso.perfurante} };
+                newToken.armor.arms  = { cortante: {...data.armor.arms.cortante},  contundente: {...data.armor.arms.contundente},  perfurante: {...data.armor.arms.perfurante}  };
+                newToken.armor.legs  = { cortante: {...data.armor.legs.cortante},  contundente: {...data.armor.legs.contundente},  perfurante: {...data.armor.legs.perfurante}  };
+            }
+
+            if (data.initiative !== undefined) {
+                newToken.initiative = data.initiative;
+            }
+
+if (data.notes !== undefined) {
+    newToken.notes = data.notes;
+}
+
+            this.tokens.push(newToken);
+            this.selected.add(newToken.id);
+        });
+    },
+
+    moveSelected(dx, dy) {
+        this.tokens.forEach(t => {
+            if (this.selected.has(t.id)) {
+                t.gx += dx;
+                t.gy += dy;
+            }
+        });
+    },
+
+    changeSize(tokenId, delta) {
+        const token = this.tokens.find(t => t.id === tokenId);
+        if (!token) return;
+
+        token.cells += delta;
+        if (token.cells < 1) token.cells = 1;
+
+        if (window.TokenPlugin?.Canvas) {
+            TokenPlugin.Canvas.draw();
+        }
+    },
+
+getById(id) {
+    return this.tokens.find(t => t.id === id);
+},
+
+};
+
+// =========================
+// TRACKER DE INICIATIVA
+// =========================
+
+TokenPlugin.Tracker = {
+
+    list: [],
+    currentIndex: 0,
+    round: 1,
+    turn: 1,
+    playing: false,
+
+    init() {
+        console.log("Tracker INIT");
+    },
+
+    // Monta a lista ordenada por iniciativa
+    buildList() {
+        const tokens = TokenPlugin.Model.all().filter(t => t.initiative !== null);
+        this.list = [...tokens].sort((a, b) => b.initiative - a.initiative);
+        this.currentIndex = 0;
+        this.round = 1;
+        this.turn = 1;
+    },
+
+    // Remove tokens deletados da lista
+    syncWithModel() {
+        const ids = new Set(TokenPlugin.Model.all().map(t => t.id));
+        const before = this.list.length;
+        this.list = this.list.filter(t => ids.has(t.id));
+
+        // ajusta índice se necessário
+        if (this.currentIndex >= this.list.length) {
+            this.currentIndex = Math.max(0, this.list.length - 1);
+        }
+
+        if (this.list.length !== before) {
+            this.updateUI();
+        }
+    },
+
+    current() {
+        return this.list[this.currentIndex] || null;
+    },
+
+    start() {
+        if (!this.list.length) this.buildList();
+        if (!this.list.length) return;
+
+        this.playing = true;
+        this._selectCurrent();
+        this.updateUI();
+    },
+
+    pause() {
+        this.playing = false;
+        TokenPlugin.Model.clearSelection();
+        TokenPlugin.Canvas.draw();
+        this.updateUI();
+    },
+
+    next() {
+        if (!this.list.length) return;
+
+        this.currentIndex++;
+
+        if (this.currentIndex >= this.list.length) {
+            this.currentIndex = 0;
+            this.round++;
+        }
+
+        this.turn++;
+
+        if (this.playing) this._selectCurrent();
+        this.updateUI();
+    },
+
+    prev() {
+        if (!this.list.length) return;
+
+        this.currentIndex--;
+
+        if (this.currentIndex < 0) {
+            this.currentIndex = this.list.length - 1;
+            this.round = Math.max(1, this.round - 1);
+        }
+
+        this.turn = Math.max(1, this.turn - 1);
+
+        if (this.playing) this._selectCurrent();
+        this.updateUI();
+    },
+
+    reset() {
+        // apaga iniciativa de todos os tokens
+        TokenPlugin.Model.all().forEach(t => {
+            t.initiative = null;
+        });
+
+        this.list = [];
+        this.currentIndex = 0;
+        this.round = 1;
+        this.turn = 1;
+        this.playing = false;
+
+        TokenPlugin.Model.clearSelection();
+        TokenPlugin.Canvas.draw();
+        this.updateUI();
+    },
+
+    _selectCurrent() {
+        const t = this.current();
+        if (!t) return;
+
+        TokenPlugin.Model.selectOnly(t.id);
+        TokenPlugin.Canvas.draw();
+    },
+
+    // Atualiza a UI do tracker na sidebar
+    updateUI() {
+        const section = document.getElementById("tracker-section");
+        if (!section) return;
+
+        // contador
+        const counter = document.getElementById("tracker-counter");
+        if (counter) {
+            if (this.list.length) {
+                const pos = this.currentIndex + 1;
+                counter.innerText = `${pos}º turno · ${this.round}ª rodada`;
+            } else {
+                counter.innerText = "Sem combate ativo";
+            }
+        }
+
+        // botão play/pause
+        const playBtn = document.getElementById("tracker-play");
+        if (playBtn) {
+            playBtn.innerText = this.playing ? "⏸" : "▶";
+        }
+
+        // lista
+        const listEl = document.getElementById("tracker-list");
+        if (!listEl) return;
+
+        listEl.innerHTML = "";
+
+        this.list.forEach((t, i) => {
+            const item = document.createElement("div");
+            item.dataset.id = t.id;
+            item.style.cssText = `
+                display:flex;
+                align-items:center;
+                gap:6px;
+                padding:4px 6px;
+                border-radius:4px;
+                margin-bottom:3px;
+                background: ${i === this.currentIndex && this.playing ? "#3a7a3a" : "#2a2a2a"};
+                cursor:grab;
+                border: 1px solid ${i === this.currentIndex && this.playing ? "#5aaa5a" : "#444"};
+            `;
+
+            // miniatura
+            const thumb = document.createElement("div");
+            thumb.style.cssText = `
+                width:28px;
+                height:28px;
+                border-radius:50%;
+                flex-shrink:0;
+                background:${t.appearance?.color || "#c0392b"};
+                overflow:hidden;
+            `;
+
+            if (t.appearance?.image) {
+                const img = document.createElement("img");
+                img.src = t.appearance.image;
+                img.style.cssText = "width:100%;height:100%;object-fit:cover;";
+                thumb.appendChild(img);
+            }
+
+            // drag handle
+            const handle = document.createElement("span");
+            handle.innerText = "☰";
+            handle.style.cssText = "opacity:0.5;font-size:14px;cursor:grab;flex-shrink:0;";
+
+            // nome + iniciativa
+            const label = document.createElement("span");
+            label.style.cssText = "flex:1;font-size:12px;color:#eee;";
+            label.innerText = `${t.appearance?.name || "?"} (${t.initiative})`;
+
+            item.appendChild(handle);
+            item.appendChild(thumb);
+            item.appendChild(label);
+            listEl.appendChild(item);
+
+            // drag and drop para reordenar
+            item.draggable = true;
+
+            item.addEventListener("dragstart", () => {
+                listEl.dataset.dragFrom = i;
+            });
+
+            item.addEventListener("dragover", (e) => {
+                e.preventDefault();
+            });
+
+            item.addEventListener("drop", () => {
+                const from = parseInt(listEl.dataset.dragFrom);
+                const to = i;
+                if (from === to) return;
+
+                const moved = this.list.splice(from, 1)[0];
+                this.list.splice(to, 0, moved);
+
+                // ajusta índice atual
+                if (from === this.currentIndex) {
+                    this.currentIndex = to;
+                } else if (from < this.currentIndex && to >= this.currentIndex) {
+                    this.currentIndex--;
+                } else if (from > this.currentIndex && to <= this.currentIndex) {
+                    this.currentIndex++;
+                }
+
+                this.updateUI();
+            });
+        });
+    }
+};
+
+</script>

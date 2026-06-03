@@ -1,0 +1,39 @@
+<script>
+window.TokenPlugin = window.TokenPlugin || {};
+
+TokenPlugin.boot = function () {
+    waitForVTT(() => {
+        TokenPlugin.Model.init();
+        TokenPlugin.Canvas.init();
+        TokenPlugin.Control.init();
+        if (TokenPlugin.Tracker?.init) TokenPlugin.Tracker.init();
+
+        // Aguarda o canvas estar fisicamente criado antes de liberar o UI
+        waitForCanvas(() => {
+            if (TokenPlugin.UI?.init) TokenPlugin.UI.init();
+        });
+    });
+};
+
+// Condição mínima: DOM pronto + VTTMode disponível
+function waitForVTT(cb) {
+    const t = setInterval(() => {
+        if (document.getElementById("map-container") && window.VTTMode) {
+            clearInterval(t);
+            cb();
+        }
+    }, 100);
+}
+
+// Condição secundária: Canvas.init() já criou o elemento canvas
+function waitForCanvas(cb) {
+    const t = setInterval(() => {
+        if (TokenPlugin.Canvas?.canvas) {
+            clearInterval(t);
+            cb();
+        }
+    }, 50);
+}
+
+TokenPlugin.boot();
+</script>

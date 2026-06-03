@@ -1,0 +1,146 @@
+<script>
+// ============================================================
+// MINARDI VTT — AudioPlugin
+// audio-model.html — Fonte da verdade do sistema
+// ============================================================
+
+console.log("audio-model carregado");
+
+window.AudioPlugin = window.AudioPlugin || {};
+
+AudioPlugin.Model = {
+
+  // ---- Biblioteca escaneada do Drive ----
+  library: {
+    music:    {},   // { "Combat": [{id, name, url}], ... }
+    ambience: {},
+    effects:  {}
+  },
+
+  // ---- ID da pasta Audio/ no Drive ----
+  audioFolderId: null,
+
+  // ---- Estado de reprodução ----
+  currentMusic:    null,   // { category, trackIndex, track }
+  activeAmbiences: {},     // { "Rain": { track, volume: 80 }, ... }
+
+  // ---- Volumes (0–100) ----
+  volumes: {
+    master:   80,
+    music:    70,
+    ambience: 60,
+    effects:  80
+  },
+
+  // ---- Soundscapes salvas ----
+  // Cada soundscape: { name, music: "Combat", ambiences: ["Rain","Wind"], musicVolume, ambienceVolume }
+  soundscapes: [],
+
+  // ---- Playlist state ----
+  playlist: {
+    mode:           "random",   // "random" | "sequential" | "single"
+    currentCategory: null,
+    history:        []          // evita repetição imediata no modo aleatório
+  },
+
+  // ---- Favoritos de efeitos ----
+  favoriteEffects: [],   // array de { category, trackName, url }
+
+  // ============================================================
+
+  init() {
+    console.log("AudioPlugin.Model INIT");
+    this._loadFromStorage();
+  },
+
+  // ---- Biblioteca ----
+
+  setLibrary(library) {
+    this.library = library;
+    console.log("AudioPlugin.Model: biblioteca carregada.", library);
+  },
+
+  getCategories(type) {
+    return Object.keys(this.library[type] || {});
+  },
+
+  getTracks(type, category) {
+    return (this.library[type] || {})[category] || [];
+  },
+
+  // ---- Volume ----
+
+  setVolume(channel, value) {
+    this.volumes[channel] = Math.max(0, Math.min(100, value));
+    AudioPlugin.Player.applyVolumes();
+  },
+
+  // ---- Soundscapes ----
+
+  saveSoundscape(name) {
+    const existing = this.soundscapes.findIndex(s => s.name === name);
+    const sc = {
+      name,
+      music:          this.currentMusic ? this.currentMusic.category : null,
+      ambiences:      Object.keys(this.activeAmbiences),
+      ambienceVolumes: {},
+      musicVolume:    this.volumes.music,
+      ambienceVolume: this.volumes.ambience
+    };
+    Object.keys(this.activeAmbiences).forEach(cat => {
+      sc.ambienceVolumes[cat] = this.activeAmbiences[cat].volume;
+    });
+    if (existing >= 0) this.soundscapes[existing] = sc;
+    else this.soundscapes.push(sc);
+    this._saveToStorage();
+  },
+
+  deleteSoundscape(name) {
+    this.soundscapes = this.soundscapes.filter(s => s.name !== name);
+    this._saveToStorage();
+  },
+
+  // ---- Favoritos ----
+
+  toggleFavoriteEffect(category, track) {
+    const key = category + "::" + track.name;
+    const idx = this.favoriteEffects.findIndex(f => f.category + "::" + f.name === key);
+    if (idx >= 0) this.favoriteEffects.splice(idx, 1);
+    else this.favoriteEffects.push({ category, name: track.name, url: track.url });
+    this._saveToStorage();
+  },
+
+  isFavoriteEffect(category, trackName) {
+    return this.favoriteEffects.some(f => f.category + "::" + f.name === category + "::" + trackName);
+  },
+
+  // ---- Persistência local ----
+
+  _saveToStorage() {
+    const data = {
+      audioFolderId:   this.audioFolderId,
+      volumes:         this.volumes,
+      soundscapes:     this.soundscapes,
+      favoriteEffects: this.favoriteEffects,
+      playlistMode:    this.playlist.mode
+    };
+    localStorage.setItem("vtt_audio_v1", JSON.stringify(data));
+  },
+
+  _loadFromStorage() {
+    try {
+      const raw = localStorage.getItem("vtt_audio_v1");
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (d.audioFolderId)   this.audioFolderId          = d.audioFolderId;
+      if (d.volumes)         Object.assign(this.volumes, d.volumes);
+      if (d.soundscapes)     this.soundscapes             = d.soundscapes;
+      if (d.favoriteEffects) this.favoriteEffects         = d.favoriteEffects;
+      if (d.playlistMode)    this.playlist.mode           = d.playlistMode;
+    } catch(e) {
+      console.warn("AudioPlugin.Model: erro ao carregar storage.", e);
+    }
+  }
+
+};
+</script>

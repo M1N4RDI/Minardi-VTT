@@ -1,0 +1,134 @@
+<script>
+// ============================================================
+// MINARDI VTT — AudioPlugin
+// audio-control.html — Eventos e lógica de interação
+// ============================================================
+
+console.log("audio-control carregado");
+
+window.AudioPlugin = window.AudioPlugin || {};
+
+AudioPlugin.Control = {
+
+  init() { console.log("AudioPlugin.Control INIT"); },
+
+  // ---- MÚSICA ----
+
+  playCategory(category, fade) {
+    const model  = AudioPlugin.Model;
+    const tracks = model.getTracks("music", category);
+    if (!tracks.length) return;
+    model.playlist.currentCategory = category;
+    const track = this._pickTrack(tracks, model.playlist);
+    model.currentMusic = { category, trackIndex: tracks.indexOf(track), track };
+    AudioPlugin.Player.playMusic(track.url, fade !== false);
+    AudioPlugin.UI.updateNowPlaying();
+    AudioPlugin.UI._renderMusicTab(); // atualiza destaque da categoria
+  },
+
+  playTrack(category, track, fade) {
+    const model = AudioPlugin.Model;
+    const tracks = model.getTracks("music", category);
+    model.playlist.currentCategory = category;
+    model.currentMusic = { category, trackIndex: tracks.indexOf(track), track };
+    AudioPlugin.Player.playMusic(track.url, fade !== false);
+    AudioPlugin.UI.updateNowPlaying();
+  },
+
+  advancePlaylist() {
+    const model = AudioPlugin.Model;
+    const cat   = model.playlist.currentCategory;
+    if (!cat) return;
+    if (model.playlist.mode === "single") return;
+    this.playCategory(cat, true);
+  },
+
+  prevTrack() {
+    const model  = AudioPlugin.Model;
+    const cur    = model.currentMusic;
+    if (!cur) return;
+    const tracks = model.getTracks("music", cur.category);
+    if (!tracks.length) return;
+    const idx  = tracks.findIndex(t => t.url === cur.track.url);
+    const prev = tracks[((idx - 1) + tracks.length) % tracks.length];
+    this.playTrack(cur.category, prev, true);
+  },
+
+  nextTrack() {
+    const model  = AudioPlugin.Model;
+    const cur    = model.currentMusic;
+    if (!cur) return;
+    const tracks = model.getTracks("music", cur.category);
+    if (!tracks.length) return;
+    const idx  = tracks.findIndex(t => t.url === cur.track.url);
+    const next = tracks[(idx + 1) % tracks.length];
+    this.playTrack(cur.category, next, true);
+  },
+
+  _pickTrack(tracks, playlist) {
+    if (tracks.length === 1) return tracks[0];
+    if (playlist.mode === "sequential") {
+      const cur  = AudioPlugin.Model.currentMusic;
+      const idx  = cur ? tracks.findIndex(t => t.url === cur.track.url) : -1;
+      return tracks[(idx + 1) % tracks.length];
+    }
+    const cur  = AudioPlugin.Model.currentMusic;
+    const last = cur ? cur.track.url : null;
+    const pool = tracks.filter(t => t.url !== last);
+    return pool[Math.floor(Math.random() * pool.length)];
+  },
+
+  // ---- AMBIÊNCIAS ----
+
+  toggleAmbience(category) {
+    const model  = AudioPlugin.Model;
+    const tracks = model.getTracks("ambience", category);
+    if (!tracks.length) return;
+    if (model.activeAmbiences[category]) {
+      AudioPlugin.Player.stopAmbience(category);
+      delete model.activeAmbiences[category];
+    } else {
+      const track = tracks[0];
+      const vol   = model.volumes.ambience;
+      model.activeAmbiences[category] = { track, volume: vol };
+      AudioPlugin.Player.startAmbience(category, track.url, vol);
+    }
+    AudioPlugin.UI.updateAmbienceState();
+  },
+
+  stopAllAmbiences() {
+    AudioPlugin.Player.stopAllAmbiences();
+    AudioPlugin.Model.activeAmbiences = {};
+    AudioPlugin.UI.updateAmbienceState();
+  },
+
+  // ---- EFEITOS ----
+
+  triggerEffect(url) { AudioPlugin.Player.playEffect(url); },
+
+  // ---- SOUNDSCAPES ----
+
+  activateSoundscape(sc) {
+    const model = AudioPlugin.Model;
+    this.stopAllAmbiences();
+    if (sc.musicVolume    !== undefined) model.volumes.music    = sc.musicVolume;
+    if (sc.ambienceVolume !== undefined) model.volumes.ambience = sc.ambienceVolume;
+    if (sc.music) this.playCategory(sc.music, true);
+    else AudioPlugin.Player.stopMusic();
+    (sc.ambiences || []).forEach(cat => this.toggleAmbience(cat));
+    AudioPlugin.UI.renderMixer();
+    AudioPlugin.UI.updateAmbienceState();
+    AudioPlugin.UI.updateNowPlaying();
+  },
+
+  silence() {
+    AudioPlugin.Player.stopMusic();
+    this.stopAllAmbiences();
+    AudioPlugin.UI.updateNowPlaying();
+  },
+
+  setVolume(channel, value) {
+    AudioPlugin.Model.setVolume(channel, value);
+  }
+};
+</script>

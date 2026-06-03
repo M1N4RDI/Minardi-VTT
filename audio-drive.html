@@ -1,0 +1,97 @@
+<script>
+// ============================================================
+// MINARDI VTT — AudioPlugin
+// audio-drive.html — Comunicação com o Google Drive
+// ============================================================
+
+console.log("audio-drive carregado");
+
+window.AudioPlugin = window.AudioPlugin || {};
+
+AudioPlugin.Drive = {
+
+  _scanning: false,
+
+  init() {
+    console.log("AudioPlugin.Drive INIT");
+  },
+
+  // ============================================================
+  // Garante estrutura de pastas e escaneia a biblioteca.
+  // Chamado pelo botão "Conectar" na UI ou no boot se já houver folderId salvo.
+  // ============================================================
+
+  connect(onSuccess, onError) {
+    if (this._scanning) return;
+    this._scanning = true;
+    AudioPlugin.UI.setStatus("Verificando estrutura no Drive...");
+
+    google.script.run
+      .withSuccessHandler(result => {
+        if (result.error) {
+          this._scanning = false;
+          AudioPlugin.UI.setStatus("Erro: " + result.error);
+          if (onError) onError(result.error);
+          return;
+        }
+
+        AudioPlugin.Model.audioFolderId = result.audioFolderId;
+        AudioPlugin.Model._saveToStorage();
+        this.scanLibrary(onSuccess, onError);
+      })
+      .withFailureHandler(err => {
+        this._scanning = false;
+        AudioPlugin.UI.setStatus("Falha ao conectar: " + err.message);
+        if (onError) onError(err.message);
+      })
+      .ensureAudioStructure();
+  },
+
+  // ============================================================
+  // Escaneia a biblioteca a partir do audioFolderId salvo.
+  // ============================================================
+
+  scanLibrary(onSuccess, onError) {
+    const folderId = AudioPlugin.Model.audioFolderId;
+    if (!folderId) {
+      AudioPlugin.UI.setStatus("Nenhuma pasta configurada.");
+      return;
+    }
+
+    AudioPlugin.UI.setStatus("Escaneando biblioteca...");
+
+    google.script.run
+      .withSuccessHandler(library => {
+        this._scanning = false;
+
+        if (library.error) {
+          AudioPlugin.UI.setStatus("Erro ao escanear: " + library.error);
+          if (onError) onError(library.error);
+          return;
+        }
+
+        AudioPlugin.Model.setLibrary(library);
+        AudioPlugin.UI.renderLibrary();
+        AudioPlugin.UI.setStatus("Biblioteca pronta.");
+
+        if (onSuccess) onSuccess(library);
+      })
+      .withFailureHandler(err => {
+        this._scanning = false;
+        AudioPlugin.UI.setStatus("Falha ao escanear: " + err.message);
+        if (onError) onError(err.message);
+      })
+      .scanAudioLibrary(folderId);
+  },
+
+  // ============================================================
+  // Re-escaneia sem re-criar estrutura. Botão "Sincronizar".
+  // ============================================================
+
+  rescanLibrary() {
+    this._scanning = false;
+    this.scanLibrary();
+  }
+
+};
+</script>

@@ -1,0 +1,412 @@
+<script>
+
+// =========================
+// GERENCIADOR GLOBAL DE MODO
+// =========================
+
+window.VTTMode = {
+
+    active: "measure", // modo padrão
+
+    set(modeName) {
+
+        // Se estava medindo, cancela
+        if (this.active === "measure") {
+            isMeasuring = false;
+
+            var canvas = document.getElementById('ui-canvas');
+            if (canvas) {
+                canvas.getContext('2d')
+                      .clearRect(0, 0, 10000, 10000);
+            }
+        }
+
+        this.active = modeName;
+        console.log("Modo ativo:", modeName);
+    },
+
+    is(modeName) {
+        return this.active === modeName;
+    }
+
+};
+
+    var ppi = 96, squarePx = 0, isMeasuring = false, startX, startY;
+    var mapScaleFactor = 1.0;
+
+    window.onload = function() { loadSession(); };
+
+    function changeSidebarPos(pos) {
+        const sidebar = document.getElementById("sidebar");
+        const btn = document.querySelector(".toggle-btn");
+
+        sidebar.classList.remove("right", "left", "top", "bottom");
+        sidebar.classList.add(pos);
+
+        btn.classList.remove("sidebar-right", "sidebar-left", "sidebar-top", "sidebar-bottom");
+        btn.classList.add("sidebar-" + pos);
+    }
+
+    /* ===== TEMA ===== */
+    function toggleTheme(theme) {
+        document.body.classList.remove('light-mode', 'rustic-mode');
+
+        if (theme === 'light') {
+            document.body.classList.add('light-mode');
+        }
+        else if (theme === 'rustic') {
+            document.body.classList.add('rustic-mode');
+        }
+
+        localStorage.setItem('vtt_theme', theme);
+    }
+
+    function toggleToolParams() {
+        document.getElementById('cone-params').style.display =
+            (document.getElementById('tool-mode').value === 'cone') ? 'block' : 'none';
+    }
+
+    function toggleSidebar(state) {
+        const sb = document.getElementById('sidebar');
+        if (state === 'close') sb.classList.add('closed');
+        else if (state === 'open') sb.classList.remove('closed');
+        else sb.classList.toggle('closed');
+    }
+
+    document.addEventListener('fullscreenchange', function() {
+        if (document.fullscreenElement) toggleSidebar('close');
+        else toggleSidebar('open');
+    });
+
+    // =========================
+    // SALVAR / CARREGAR SESSÃO
+    // =========================
+
+    function saveSession() {
+        var data = {
+            folderId:      document.getElementById('folder-id').value,
+            tokenFolderId: (document.getElementById('token-folder-id') || {}).value || "",
+            gridColor:     document.getElementById('grid-color').value,
+            gridOpacity:   document.getElementById('grid-opacity').value,
+            gridCm:        document.getElementById('grid-cm').value,
+            screenInches:  document.getElementById('screen-inches').value,
+            mapFit:        document.getElementById('map-fit').value,
+            scale:         document.getElementById('scale-ratio').value,
+            coneAngle:     document.getElementById('cone-angle').value,
+            toolMode:      document.getElementById('tool-mode').value,
+            mapScale:      document.getElementById('map-scale').value
+        };
+        localStorage.setItem('vtt_minardi_v1', JSON.stringify(data));
+        alert("Minardi VTT: Configurações Salvas!");
+    }
+
+    function loadSession() {
+        var saved = localStorage.getItem('vtt_minardi_v1');
+        if (saved) {
+            var d = JSON.parse(saved);
+            document.getElementById('folder-id').value        = d.folderId     || "";
+            document.getElementById('grid-color').value       = d.gridColor    || "#ffffff";
+            document.getElementById('grid-opacity').value     = d.gridOpacity  || "0.4";
+            document.getElementById('grid-cm').value          = d.gridCm       || "2.5";
+            document.getElementById('screen-inches').value    = d.screenInches || "24";
+            document.getElementById('map-fit').value          = d.mapFit       || "original";
+            document.getElementById('scale-ratio').value      = d.scale        || "1.5";
+            document.getElementById('cone-angle').value       = d.coneAngle    || "60";
+            document.getElementById('tool-mode').value        = d.toolMode     || "line";
+
+            var tokenFolderEl = document.getElementById('token-folder-id');
+            if (tokenFolderEl && d.tokenFolderId) tokenFolderEl.value = d.tokenFolderId;
+
+            // Restaura escala do mapa
+            if (d.mapScale !== undefined) {
+                applyMapScale(parseInt(d.mapScale));
+            }
+        }
+
+        // Carrega tema salvo
+        var savedTheme = localStorage.getItem('vtt_theme') || 'dark';
+        toggleTheme(savedTheme);
+
+        toggleToolParams();
+        updateCalibration();
+    }
+
+    // =========================
+    // MEDIÇÃO / FERRAMENTAS
+    // =========================
+
+    function startMeasure(e) {
+        if (!VTTMode.is("measure")) return;
+        if (e.button !== 0 || !squarePx) return;
+        isMeasuring = true;
+        var rect = document.getElementById('ui-canvas').getBoundingClientRect();
+        var rawX = e.clientX - rect.left;
+        var rawY = e.clientY - rect.top;
+        startX = (Math.floor(rawX / squarePx) * squarePx) + (squarePx / 2);
+        startY = (Math.floor(rawY / squarePx) * squarePx) + (squarePx / 2);
+    }
+
+    function updateMeasure(e) {
+        if (!VTTMode.is("measure")) return;
+        if (!isMeasuring) return;
+        var canvas = document.getElementById('ui-canvas'), ctx = canvas.getContext('2d');
+        var rect = canvas.getBoundingClientRect();
+        var currX = e.clientX - rect.left, currY = e.clientY - rect.top;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        var distPx = Math.sqrt(Math.pow(currX - startX, 2) + Math.pow(currY - startY, 2));
+        var distSq = Math.ceil(distPx / squarePx);
+        var ratio  = parseFloat(document.getElementById('scale-ratio').value);
+        var text   = distSq + " sq (" + (distSq * ratio).toFixed(1) + "m)";
+        ctx.strokeStyle = "#4e9af1";
+        ctx.fillStyle   = "rgba(78, 154, 241, 0.2)";
+        ctx.lineWidth   = 3;
+
+        var mode = document.getElementById('tool-mode').value;
+        if (mode === "line") {
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(currX, currY);
+            ctx.stroke();
+        }
+        else if (mode === "circle") {
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.arc(startX, startY, distPx, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+        }
+        else if (mode === "cone") {
+            var angleDeg    = parseFloat(document.getElementById('cone-angle').value) || 60;
+            var centralAngle = Math.atan2(currY - startY, currX - startX);
+            var halfAngle   = (angleDeg * Math.PI / 180) / 2;
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.arc(startX, startY, distPx, centralAngle - halfAngle, centralAngle + halfAngle);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+        }
+
+        ctx.setLineDash([]);
+        ctx.font      = "bold 18px Arial";
+        ctx.fillStyle = "black";
+        ctx.fillText(text, currX + 12, currY - 8);
+        ctx.fillStyle = "white";
+        ctx.fillText(text, currX + 10, currY - 10);
+    }
+
+    function stopMeasure() {
+        if (!VTTMode.is("measure")) return;
+        isMeasuring = false;
+        document.getElementById('ui-canvas')
+            .getContext('2d')
+            .clearRect(0, 0, 10000, 10000);
+    }
+
+    // =========================
+    // CALIBRAÇÃO E GRID
+    // =========================
+
+    function updateCalibration() {
+        var inches = parseFloat(document.getElementById('screen-inches').value) || 24;
+        ppi = Math.sqrt(Math.pow(window.screen.width, 2) + Math.pow(window.screen.height, 2)) / inches;
+        drawGrid();
+    }
+
+    function drawGrid() {
+        var canvas = document.getElementById('grid-canvas'),
+            ctx    = canvas.getContext('2d');
+
+        var active = (document.getElementById('map-video').style.display === "block")
+            ? document.getElementById('map-video')
+            : document.getElementById('map-image');
+
+        if (!active.src || active.clientWidth === 0) return;
+
+        squarePx = (ppi / 2.54) *
+            (parseFloat(document.getElementById('grid-cm').value) || 2.5);
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle  = document.getElementById('grid-color').value;
+        ctx.globalAlpha  = document.getElementById('grid-opacity').value;
+        ctx.lineWidth    = 1;
+        ctx.beginPath();
+
+        for (var x = 0; x <= canvas.width; x += squarePx) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+        }
+        for (var y = 0; y <= canvas.height; y += squarePx) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+        }
+
+        ctx.stroke();
+        window.VTTGrid = { size: squarePx };
+    }
+
+    // =========================
+    // ESCALA DO MAPA
+    // =========================
+
+    // Ponto central de verdade: toda mudança de escala passa por aqui.
+    // oninput do slider só atualiza o display visualmente (sem redesenhar).
+    // onchange do slider e o input numérico chamam applyMapScale.
+    function applyMapScale(val) {
+        val = Math.min(100, Math.max(-100, isNaN(val) ? 0 : val));
+        mapScaleFactor = Math.max(0.1, 1 + (val / 100));
+
+        // Sincroniza todos os controles
+        document.getElementById('map-scale').value          = val;
+        document.getElementById('map-scale-number').value   = val;
+        document.getElementById('map-scale-display').textContent =
+            (val >= 0 ? "+" : "") + val + "%";
+
+        updateMapSize();
+    }
+
+    // =========================
+    // TAMANHO DO MAPA
+    // =========================
+
+    function updateMapSize() {
+        var img   = document.getElementById('map-image'),
+            video = document.getElementById('map-video'),
+            fit   = document.getElementById('map-fit').value;
+
+        var active = (video.style.display === "block") ? video : img;
+        if (!active.src) return;
+
+        // Limpa dimensões inline para medir o tamanho base do fit
+        active.style.width  = "";
+        active.style.height = "";
+
+        if      (fit === "width")   active.style.width  = "100vw";
+        else if (fit === "height")  active.style.height = "100vh";
+        else if (fit === "stretch") { active.style.width = "100vw"; active.style.height = "100vh"; }
+
+        setTimeout(function() {
+            var baseW = active.clientWidth  || active.naturalWidth  || 800;
+            var baseH = active.clientHeight || active.naturalHeight || 600;
+
+            var scaledW = Math.round(baseW * mapScaleFactor);
+            var scaledH = Math.round(baseH * mapScaleFactor);
+
+            active.style.width  = scaledW + "px";
+            active.style.height = scaledH + "px";
+
+            // Canvases acompanham exatamente
+            var g = document.getElementById('grid-canvas'),
+                u = document.getElementById('ui-canvas');
+            g.width  = u.width  = scaledW;
+            g.height = u.height = scaledH;
+
+            // Corrige scroll: quando mapa > viewport, alinha ao início
+            // para garantir acesso a 100% da imagem pelos scrollbars
+            var wrapper = document.getElementById('main-wrapper');
+var hasMap  = active.src && active.clientWidth > 0;
+
+if (hasMap && (scaledW > window.innerWidth || scaledH > window.innerHeight)) {
+    wrapper.style.justifyContent = "flex-start";
+    wrapper.style.alignItems     = "flex-start";
+} else {
+    wrapper.style.justifyContent = "center";
+    wrapper.style.alignItems     = "center";
+}
+
+            drawGrid();
+        }, 150);
+    }
+
+    // =========================
+    // DRIVE — MAPAS
+    // =========================
+
+    function connectDrive() {
+        var id  = document.getElementById('folder-id').value,
+            lib = document.getElementById('drive-library');
+
+        lib.innerHTML = "Conectando...";
+
+        google.script.run.withSuccessHandler(function(maps) {
+            lib.innerHTML = "";
+            maps.forEach(function(m) {
+                var d = document.createElement('div');
+                d.className = 'drive-item';
+                d.innerText = (m.type === 'video' ? "🎬 " : "📜 ") + m.name;
+                d.onclick = function() { selectMap(m); };
+                lib.appendChild(d);
+            });
+        }).getMapsFromDrive(id);
+    }
+
+    function selectMap(map) {
+        var img   = document.getElementById('map-image'),
+            video = document.getElementById('map-video');
+
+        if (map.type === 'video') {
+            img.style.display   = "none";
+            video.style.display = "block";
+            video.src           = map.dataUrl;
+            document.getElementById('video-controls').style.display = "block";
+            video.onloadedmetadata = updateMapSize;
+        } else {
+            video.style.display = "none";
+            video.pause();
+            img.style.display   = "block";
+            img.src             = map.dataUrl;
+            document.getElementById('video-controls').style.display = "none";
+            img.onload = updateMapSize;
+        }
+    }
+
+    function toggleVideoPlayback() {
+        var v = document.getElementById('map-video'),
+            b = document.getElementById('play-pause-btn');
+
+        if (v.paused) { v.play();  b.innerText = "⏸ PAUSAR"; }
+        else          { v.pause(); b.innerText = "▶ REPRODUZIR"; }
+    }
+
+    // =========================
+    // UTILITÁRIOS
+    // =========================
+
+    function toggleFullscreen() {
+        !document.fullscreenElement
+            ? document.documentElement.requestFullscreen()
+            : document.exitFullscreen();
+    }
+
+    window.addEventListener('resize', updateMapSize);
+
+    // =========================
+    // DRIVE — TOKENS
+    // =========================
+
+    function connectTokenDrive() {
+        var idInput = document.getElementById('token-folder-id');
+        if (!idInput) return;
+
+        var id = idInput.value;
+        if (!id) {
+            alert("Informe o ID da pasta de Tokens.");
+            return;
+        }
+
+        google.script.run
+            .withSuccessHandler(function(images) {
+                if (images.error) {
+                    alert("Erro: " + images.error);
+                    return;
+                }
+                if (window.TokenPlugin && TokenPlugin.Model) {
+                    TokenPlugin.Model.setImageLibrary(images);
+                }
+                alert("Tokens carregados: " + images.length);
+            })
+            .getTokenImagesFromDrive(id);
+    }
+
+</script>

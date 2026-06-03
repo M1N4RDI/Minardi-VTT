@@ -1,0 +1,175 @@
+<script>
+// ============================================================
+// MINARDI VTT — LightPlugin
+// light-control.html — Máquina de estados
+//
+// state = { cat, fmt, fn }
+//   cat: "darkness" | "light" | "walls"
+//   fmt: "rect" | "circle" | "line"
+//   fn:  "draw" | "erase" | "select"
+//
+// Só um estado ativo por vez. Todos os subsistemas consultam
+// LightPlugin.Control.state para decidir se devem agir.
+// ============================================================
+
+console.log("light-control carregado");
+
+window.LightPlugin = window.LightPlugin || {};
+
+LightPlugin.Control = {
+
+  state: {
+    cat: "darkness",
+    fmt: "rect",
+    fn:  "select"
+  },
+
+  _rafPending: false,
+  _tokenSig:   "",
+
+  init() {
+    console.log("LightPlugin.Control INIT");
+    this._bindKeyboard();
+    this._startTokenObserver();
+  },
+
+  // ============================================================
+  // ESTADO
+  // ============================================================
+
+  setState(partial) {
+    Object.assign(this.state, partial);
+    LightPlugin.UI.updateToolbar();
+  },
+
+  // Ativa o modo iluminação no VTTMode global
+  enterLightMode() {
+    VTTMode.set("lighting");
+    LightPlugin.Model.settings.enabled = true;
+    LightPlugin.Model._save();
+    this.requestRedraw();
+    LightPlugin.UI.updateToolbar();
+    LightPlugin.UI.updateToggleButtons();
+  },
+
+  exitLightMode() {
+    VTTMode.set("measure");
+    LightPlugin.Canvas.redraw(); // limpa se desabilitado
+    LightPlugin.UI.updateToggleButtons();
+  },
+
+  toggleLighting() {
+    if (LightPlugin.Model.settings.enabled) {
+      LightPlugin.Model.settings.enabled = false;
+      LightPlugin.Model._save();
+      VTTMode.set("measure");
+      LightPlugin.Canvas.redraw();
+    } else {
+      this.enterLightMode();
+    }
+    LightPlugin.UI.updateToggleButtons();
+  },
+
+  toggleMasterReveal() {
+    const m = LightPlugin.Model.settings;
+    m.masterReveal = !m.masterReveal;
+    LightPlugin.Model._save();
+    this.requestRedraw();
+    LightPlugin.UI.updateToggleButtons();
+  },
+
+  toggleShowWalls() {
+    const m = LightPlugin.Model.settings;
+    m.showWalls = !m.showWalls;
+    LightPlugin.Model._save();
+    this.requestRedraw();
+    LightPlugin.UI.updateToggleButtons();
+  },
+
+  // ============================================================
+  // REDRAW (debounced)
+  // ============================================================
+
+  requestRedraw() {
+    if (this._rafPending) return;
+    this._rafPending = true;
+    requestAnimationFrame(() => {
+      this._rafPending = false;
+      LightPlugin.Canvas.redraw();
+    });
+  },
+
+  // ============================================================
+  // LUZ — ações do modelo
+  // ============================================================
+
+  addLightObject(props) {
+    const obj = LightPlugin.Model.addLight(props);
+    this.requestRedraw();
+    LightPlugin.UI.refreshLists();
+    return obj;
+  },
+
+  removeLight(id) {
+    LightPlugin.Model.removeLight(id);
+    this.requestRedraw();
+    LightPlugin.UI.refreshLists();
+  },
+
+  updateLight(id, props) {
+    LightPlugin.Model.updateLight(id, props);
+    this.requestRedraw();
+    LightPlugin.UI.refreshLists();
+  },
+
+  // ============================================================
+  // PAREDES — ações do modelo
+  // ============================================================
+
+  clearAllWalls() {
+    LightPlugin.Model.wallObjects = [];
+    LightPlugin.Model._save();
+    this.requestRedraw();
+    LightPlugin.UI.refreshLists();
+  },
+
+  // ============================================================
+  // TECLADO
+  // ============================================================
+
+  _bindKeyboard() {
+    document.addEventListener("keydown", e => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+
+      // L = toggle master reveal
+      if (e.key === "l" || e.key === "L") this.toggleMasterReveal();
+
+      // Escape = sai do modo iluminação
+      if (e.key === "Escape" && VTTMode.is("lighting")) this.exitLightMode();
+    });
+  },
+
+  // ============================================================
+  // OBSERVER DE TOKENS COM LUZ
+  // ============================================================
+
+  _startTokenObserver() {
+    setInterval(() => {
+      if (!LightPlugin.Model.settings.enabled) return;
+      if (!window.TokenPlugin?.Model) return;
+
+      const sig = JSON.stringify(
+        TokenPlugin.Model.all()
+          .filter(t => t.light?.enabled)
+          .map(t => ({ id: t.id, gx: t.gx, gy: t.gy,
+                       r: t.light.radius, dr: t.light.dimRadius }))
+      );
+
+      if (sig !== this._tokenSig) {
+        this._tokenSig = sig;
+        this.requestRedraw();
+      }
+    }, 120);
+  }
+};
+</script>

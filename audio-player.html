@@ -1,0 +1,174 @@
+<script>
+// ============================================================
+// MINARDI VTT — AudioPlugin
+// audio-player.html — Motor de reprodução
+// ============================================================
+
+console.log("audio-player carregado");
+
+window.AudioPlugin = window.AudioPlugin || {};
+
+AudioPlugin.Player = {
+
+  _musicEl:     null,
+  _fadeEl:      null,
+  _ambienceEls: {},
+  _effectsPool: [],
+  _fadeDuration: 3000,
+
+  init() {
+    console.log("AudioPlugin.Player INIT");
+    this._musicEl = new Audio();
+    this._fadeEl  = new Audio();
+    this._musicEl.loop = false;
+    this._fadeEl.loop  = false;
+
+    this._attachTimeUpdate(this._musicEl);
+
+    for (var i = 0; i < 8; i++) this._effectsPool.push(new Audio());
+
+    this.applyVolumes();
+  },
+
+  _attachTimeUpdate(el) {
+    el.addEventListener("timeupdate", () => {
+      if (el !== this._musicEl) return;
+      AudioPlugin.UI.updateProgressBar();
+      const dur = el.duration;
+      if (!dur || isNaN(dur)) return;
+      if (!el._fadingOut && dur - el.currentTime <= this._fadeDuration / 1000) {
+        el._fadingOut = true;
+        AudioPlugin.Control.advancePlaylist();
+      }
+    });
+  },
+
+  playMusic(url, fade) {
+    if (!url) return;
+    if (fade && this._musicEl.src && !this._musicEl.paused) {
+      this._crossfade(url);
+    } else {
+      this._musicEl._fadingOut = false;
+      this._musicEl.src    = url;
+      this._musicEl.volume = this._effectiveVolume("music");
+      this._musicEl.play().catch(e => console.warn("AudioPlayer: erro ao tocar música.", e));
+    }
+  },
+
+  pauseMusic() {
+    if (this._musicEl.paused) {
+      this._musicEl.play().catch(() => {});
+    } else {
+      this._musicEl.pause();
+    }
+  },
+
+  stopMusic() {
+    const el = this._musicEl;
+    if (!el.src || el.paused) {
+      el.src = ""; el._fadingOut = false;
+      AudioPlugin.Model.currentMusic = null;
+      AudioPlugin.UI.updateNowPlaying();
+      AudioPlugin.UI.updateProgressBar();
+      return;
+    }
+    const steps = 20, interval = this._fadeDuration / steps;
+    const startVol = el.volume;
+    let step = 0;
+    const timer = setInterval(() => {
+      step++;
+      el.volume = Math.max(0, startVol * (1 - step / steps));
+      if (step >= steps) {
+        clearInterval(timer);
+        el.pause(); el.src = ""; el._fadingOut = false;
+        AudioPlugin.Model.currentMusic = null;
+        AudioPlugin.UI.updateNowPlaying();
+        AudioPlugin.UI.updateProgressBar();
+      }
+    }, interval);
+  },
+
+  seekTo(ratio) {
+    const el = this._musicEl;
+    if (!el || !el.duration || isNaN(el.duration)) return;
+    el.currentTime = el.duration * ratio;
+  },
+
+  getCurrentTime()  { return this._musicEl ? this._musicEl.currentTime : 0; },
+  getDuration()     { return this._musicEl ? (this._musicEl.duration || 0) : 0; },
+  isPaused()        { return this._musicEl ? this._musicEl.paused : true; },
+
+  _crossfade(newUrl) {
+    const steps = 30, interval = this._fadeDuration / steps;
+    const outEl = this._musicEl, inEl = this._fadeEl;
+    inEl._fadingOut = false;
+    inEl.src = newUrl; inEl.volume = 0;
+    inEl.play().catch(() => {});
+    let step = 0;
+    const timer = setInterval(() => {
+      step++;
+      const p = step / steps;
+      outEl.volume = Math.max(0, this._effectiveVolume("music") * (1 - p));
+      inEl.volume  = Math.min(this._effectiveVolume("music"), this._effectiveVolume("music") * p);
+      if (step >= steps) {
+        clearInterval(timer);
+        outEl.pause(); outEl.src = ""; outEl._fadingOut = false;
+        this._musicEl = inEl; this._fadeEl = outEl;
+        this._musicEl._fadingOut = false;
+        this._attachTimeUpdate(this._musicEl);
+      }
+    }, interval);
+  },
+
+  startAmbience(category, url, volume) {
+    if (this._ambienceEls[category]) {
+      this._ambienceEls[category].volume = this._effectiveVolume("ambience", volume);
+      return;
+    }
+    const el = new Audio();
+    el.src = url; el.loop = true;
+    el.volume = this._effectiveVolume("ambience", volume);
+    el.play().catch(e => console.warn("AudioPlayer: erro ao tocar ambiência.", e));
+    this._ambienceEls[category] = el;
+  },
+
+  stopAmbience(category) {
+    const el = this._ambienceEls[category];
+    if (!el) return;
+    el.pause(); el.src = "";
+    delete this._ambienceEls[category];
+  },
+
+  stopAllAmbiences() {
+    Object.keys(this._ambienceEls).forEach(cat => this.stopAmbience(cat));
+  },
+
+  setAmbienceVolume(category, volume) {
+    const el = this._ambienceEls[category];
+    if (el) el.volume = this._effectiveVolume("ambience", volume);
+  },
+
+  playEffect(url) {
+    let el = this._effectsPool.find(e => e.paused || e.ended);
+    if (!el) { el = new Audio(); this._effectsPool.push(el); }
+    el.src = url; el.volume = this._effectiveVolume("effects");
+    el.play().catch(e => console.warn("AudioPlayer: erro ao tocar efeito.", e));
+  },
+
+  _effectiveVolume(channel, customVolume) {
+    const master = AudioPlugin.Model.volumes.master / 100;
+    const chan   = (customVolume !== undefined ? customVolume : AudioPlugin.Model.volumes[channel]) / 100;
+    return Math.min(1, master * chan);
+  },
+
+  applyVolumes() {
+    if (this._musicEl) this._musicEl.volume = this._effectiveVolume("music");
+    Object.keys(this._ambienceEls).forEach(cat => {
+      const m = AudioPlugin.Model.activeAmbiences[cat];
+      this._ambienceEls[cat].volume = this._effectiveVolume("ambience", m ? m.volume : AudioPlugin.Model.volumes.ambience);
+    });
+  },
+
+  setFadeDuration(ms) { this._fadeDuration = ms; }
+};
+</script>
