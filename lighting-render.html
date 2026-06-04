@@ -1,6 +1,5 @@
 <script>
-// lighting-render.html
-// Renderizador e algoritmo de visibilidade para o módulo Lighting
+// lighting-render.html — Renderização do sistema de iluminação
 console.log('lighting-render carregado');
 
 window.Lighting = window.Lighting || {};
@@ -8,12 +7,14 @@ Lighting.Render = {
   _canvas: null,
   _ctx: null,
   _spatialIndex: null,
-  _cellSize: null,
 
   init() {
     if (this._canvas) return;
     const map = document.getElementById('map-container');
-    if (!map) return;
+    if (!map) {
+      setTimeout(() => this.init(), 200);
+      return;
+    }
     const c = document.createElement('canvas');
     c.id = 'lighting-overlay-canvas';
     c.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:999;';
@@ -29,197 +30,276 @@ Lighting.Render = {
     if (!map || !this._canvas) return;
     const w = map.clientWidth || map.offsetWidth;
     const h = map.clientHeight || map.offsetHeight;
-    this._canvas.width = w; this._canvas.height = h;
-    this._cellSize = (Lighting.Model.gridSize || 50) * 2; // cell size for spatial index
+    this._canvas.width = w;
+    this._canvas.height = h;
     this.buildSpatialIndex();
   },
 
-  // Build simple spatial hash for wall segments
   buildSpatialIndex() {
-    const cell = this._cellSize || 100;
-    const idx = new Map();
-    const segs = Lighting.Model.walls.map(w => ({ x1:w.p1.x, y1:w.p1.y, x2:w.p2.x, y2:w.p2.y, id:w.id }));
-    for (let s = 0; s < segs.length; s++) {
-      const sg = segs[s];
-      const minX = Math.min(sg.x1, sg.x2), maxX = Math.max(sg.x1, sg.x2);
-      const minY = Math.min(sg.y1, sg.y2), maxY = Math.max(sg.y1, sg.y2);
-      const ix0 = Math.floor(minX / cell), ix1 = Math.floor(maxX / cell);
-      const iy0 = Math.floor(minY / cell), iy1 = Math.floor(maxY / cell);
-      for (let ix = ix0; ix <= ix1; ix++) for (let iy = iy0; iy <= iy1; iy++) {
-        const key = ix + ',' + iy;
-        if (!idx.has(key)) idx.set(key, []);
-        idx.get(key).push(sg);
-      }
+    // Quadtree para paredes
+    function QTNode(x, y, w, h, depth = 0) {
+      this.x = x;
+      this.y = y;
+      this.w = w;
+      this.h = h;
+      this.depth = depth;
+      this.segs = [];
+      this.children = null;
     }
-    this._spatialIndex = { map: idx, cell };
+    QTNode.prototype.insert = function (seg) {
+      if (this.children) {
+        const boxes = this.children;
+        for (let i = 0; i < 4; i++) boxes[i].insert(seg);
+        return;
+      }
+      this.segs.push(seg);
+      if (this.segs.length > 8 && this.depth < 8) {
+        this.subdivide();
+        const old = this.segs;
+        this.segs = [];
+        for (let i = 0; i < old.length; i++) this.insert(old[i]);
+      }
+    };
+    QTNode.prototype.subdivide = function () {
+      const hw = this.w / 2,
+        hh = this.h / 2,
+        d = this.depth + 1;
+      this.children = [
+        new QTNode(this.x, this.y, hw, hh, d),
+        new QTNode(this.x + hw, this.y, hw, hh, d),
+        new QTNode(this.x, this.y + hh, hw, hh, d),
+        new QTNode(this.x + hw, this.y + hh, hw, hh, d),
+      ];
+    };
+
+    const c = this._canvas;
+    if (!c) return;
+    const root = new QTNode(0, 0, c.width, c.height, 0);
+    const segs = Lighting.Model.walls.map((w) => ({
+      x1: w.p1.x,
+      y1: w.p1.y,
+      x2: w.p2.x,
+      y2: w.p2.y,
+      id: w.id,
+    }));
+    for (let i = 0; i < segs.length; i++) root.insert(segs[i]);
+    this._spatialIndex = { root };
   },
 
-  // Get candidate segments along a ray by sampling cells
-  _getCandidateSegmentsForRay(ox, oy, dx, dy, maxDist) {
-    const out = [];
-    if (!this._spatialIndex) return out;
-    const { map, cell } = this._spatialIndex;
-    const steps = Math.max(3, Math.ceil(maxDist / cell) * 2);
-    const seen = new Set();
-    for (let i = 0; i <= steps; i++) {
-      const t = (i / steps) * maxDist;
-      const x = ox + dx * t, y = oy + dy * t;
-      const ix = Math.floor(x / cell), iy = Math.floor(y / cell);
-      const key = ix + ',' + iy;
-      const bucket = map.get(key);
-      if (!bucket) continue;
-      for (let j = 0; j < bucket.length; j++) {
-        const sg = bucket[j];
-        if (!seen.has(sg.id)) { seen.add(sg.id); out.push(sg); }
-      }
-    }
-    return out;
-  },
+  draw() {
+    if (!this._canvas) this.init();
+    const c = this._canvas;
+    if (!c) return;
+    const ctx = this._ctx;
+    const W = c.width,
+      H = c.height;
+    ctx.clearRect(0, 0, W, H);
 
-  // Core: compute visibility polygon (angles derived from wall vertices)
-  computeVisibility(origin, radiusPx) {
-    const walls = Lighting.Model.walls;
-    if (!walls || walls.length === 0) return this._circlePoly(origin, radiusPx, 64);
+    // fundo escuro base
+    ctx.fillStyle = 'rgba(0,0,0,0.9)';
+    ctx.fillRect(0, 0, W, H);
 
-    // collect segments
-    const segs = walls.map(w => ({ x1:w.p1.x, y1:w.p1.y, x2:w.p2.x, y2:w.p2.y }));
+    // desenhar objetos
+    Lighting.Model.objects.forEach((obj) => {
+      if (!obj.visible) return;
 
-    // collect unique vertices
-    const verts = [];
-    const seen = new Set();
-    for (let i = 0; i < segs.length; i++) {
-      const s = segs[i];
-      const k1 = s.x1 + ',' + s.y1; if (!seen.has(k1)) { seen.add(k1); verts.push({x:s.x1,y:s.y1}); }
-      const k2 = s.x2 + ',' + s.y2; if (!seen.has(k2)) { seen.add(k2); verts.push({x:s.x2,y:s.y2}); }
-    }
+      ctx.save();
 
-    const angs = [];
-    for (let i = 0; i < verts.length; i++) {
-      const v = verts[i];
-      const a = Math.atan2(v.y - origin.y, v.x - origin.x);
-      angs.push(a - 0.0001, a, a + 0.0001);
-    }
-    angs.sort((a,b)=>a-b);
-    const uniq = [];
-    for (let i=0;i<angs.length;i++) if (i===0||Math.abs(angs[i]-angs[i-1])>1e-7) uniq.push(angs[i]);
+      if (obj.mode === 'dark') {
+        // áreas escuras são mantidas
+        // nada a fazer - já começamos com background escuro
+      } else if (obj.mode === 'light') {
+        // áreas iluminadas: remover escuridão
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillStyle = 'rgba(0,0,0,1)';
+        this._drawShape(ctx, obj);
+        ctx.fill();
 
-    const hits = [];
-    const ox = origin.x, oy = origin.y;
-    for (let i = 0; i < uniq.length; i++) {
-      const angle = uniq[i];
-      const dx = Math.cos(angle), dy = Math.sin(angle);
-
-      let nearestT = radiusPx;
-      let hitX = ox + dx * radiusPx, hitY = oy + dy * radiusPx;
-
-      // candidate segments from spatial index
-      const candidates = this._getCandidateSegmentsForRay(ox, oy, dx, dy, radiusPx);
-      // fallback: if none, test all
-      const toTest = candidates.length ? candidates : segs;
-
-      for (let s = 0; s < toTest.length; s++) {
-        const seg = toTest[s];
-        const t = this._raySegIntersect(ox, oy, dx, dy, seg.x1, seg.y1, seg.x2, seg.y2);
-        if (t !== null && t >= 0 && t < nearestT) {
-          nearestT = t;
-          hitX = ox + dx * t; hitY = oy + dy * t;
+        // penumbra: cinza
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = 'rgba(100,100,100,0.9)';
+        const penRadius = (obj.penumbra || 12) * (Lighting.Model.gridSize || 50);
+        if (obj.shape === 'circle') {
+          ctx.beginPath();
+          ctx.arc(obj.x, obj.y, obj.radius + penRadius, 0, Math.PI * 2);
+          ctx.fill();
         }
       }
 
-      hits.push({ x: hitX, y: hitY, angle });
-    }
+      ctx.restore();
+    });
 
-    hits.sort((a,b)=>a.angle-b.angle);
-    return hits;
-  },
-
-  _circlePoly(origin, radius, res) {
-    const pts = [];
-    for (let i=0;i<res;i++){
-      const a = (i/res)*Math.PI*2;
-      pts.push({ x: origin.x + Math.cos(a)*radius, y: origin.y + Math.sin(a)*radius, angle:a });
-    }
-    return pts;
-  },
-
-  // ray-seg intersection (returns t along ray) — copied/inline fast
-  _raySegIntersect(ox, oy, dx, dy, x1, y1, x2, y2) {
-    const ex = x2 - x1, ey = y2 - y1;
-    const denom = dx * ey - dy * ex;
-    if (Math.abs(denom) < 1e-10) return null;
-    const tx = x1 - ox, ty = y1 - oy;
-    const t = (tx * ey - ty * ex) / denom;
-    const u = (tx * dy - ty * dx) / denom;
-    if (t > 0 && u >= 0 && u <= 1) return t;
-    return null;
-  },
-
-  // Draw full lighting pass using 3-state rendering: darkness, penumbra (gray), light (reveal)
-  draw() {
-    if (!this._canvas) this.init();
-    const c = this._canvas; if (!c) return;
-    const ctx = this._ctx; const W = c.width, H = c.height;
-    ctx.clearRect(0,0,W,H);
-
-    // Draw darkness base
+    // desenhar paredes
     ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,1)';
-    ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle = 'rgba(200,200,200,0.3)';
+    ctx.lineWidth = 2;
+    Lighting.Model.walls.forEach((wall) => {
+      if (!wall.visible) return;
+      ctx.beginPath();
+      ctx.moveTo(wall.p1.x, wall.p1.y);
+      ctx.lineTo(wall.p2.x, wall.p2.y);
+      ctx.stroke();
+    });
     ctx.restore();
 
-    const gridSize = Lighting.Model.gridSize || 50;
+    // UI overlay: seleção, handles, preview
+    this._drawUI();
+  },
 
-    // Draw penumbras first: cut then paint gray
-    for (let i=0;i<Lighting.Model.lights.length;i++){
-      const L = Lighting.Model.lights[i];
-      const rPenPx = (L.rPenumbra || L.rPenumbra===0 ? L.rPenumbra : 12) * gridSize;
-      const poly = this.computeVisibility({x:L.x,y:L.y}, rPenPx);
-      if (!poly || !poly.length) continue;
-
-      // cut
-      ctx.save(); ctx.globalCompositeOperation = 'destination-out'; ctx.beginPath();
-      ctx.moveTo(poly[0].x, poly[0].y); for (let p=1;p<poly.length;p++) ctx.lineTo(poly[p].x, poly[p].y); ctx.closePath(); ctx.fill(); ctx.restore();
-      // paint gray (penumbra)
-      ctx.save(); ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = 'rgba(120,120,120,1)'; ctx.beginPath(); ctx.moveTo(poly[0].x, poly[0].y); for (let p=1;p<poly.length;p++) ctx.lineTo(poly[p].x, poly[p].y); ctx.closePath(); ctx.fill(); ctx.restore();
+  _drawShape(ctx, obj) {
+    if (obj.shape === 'rect') {
+      ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
+    } else if (obj.shape === 'circle') {
+      ctx.beginPath();
+      ctx.arc(obj.x, obj.y, obj.radius, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (obj.shape === 'polygon' && obj.points) {
+      ctx.beginPath();
+      if (obj.points.length > 0) {
+        ctx.moveTo(obj.points[0].x, obj.points[0].y);
+        for (let i = 1; i < obj.points.length; i++) {
+          ctx.lineTo(obj.points[i].x, obj.points[i].y);
+        }
+        ctx.closePath();
+      }
+      ctx.fill();
     }
+  },
 
-    // Draw full light (reveal) — cut the gray to reveal map
-    for (let i=0;i<Lighting.Model.lights.length;i++){
-      const L = Lighting.Model.lights[i];
-      const rLightPx = (L.rLight || 6) * gridSize;
-      const poly = this.computeVisibility({x:L.x,y:L.y}, rLightPx);
-      if (!poly || !poly.length) continue;
-      ctx.save(); ctx.globalCompositeOperation = 'destination-out'; ctx.beginPath(); ctx.moveTo(poly[0].x, poly[0].y); for (let p=1;p<poly.length;p++) ctx.lineTo(poly[p].x, poly[p].y); ctx.closePath(); ctx.fill(); ctx.restore();
+  _drawUI() {
+    const ctx = this._ctx;
+    const selectedId = Lighting.Input.selectedObjectId;
+    const activeTool = Lighting.Input.activeTool;
 
-      // If explored mode, accumulate
-      // For now, assume explore mode active if any fog.behavior==='explored'
-      const hasExploredMode = Lighting.Model.fogs.some(f=>f.behavior==='explored');
-      if (hasExploredMode) Lighting.Model.accumulateExplored(poly.map(p=>({x:p.x,y:p.y}))); 
-    }
+    // desenhar objeto selecionado
+    if (selectedId) {
+      const obj = Lighting.Model.getObject(selectedId);
+      if (obj) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,220,100,0.95)';
+        ctx.lineWidth = 2;
+        this._drawShape(ctx, obj);
+        ctx.stroke();
 
-    // Apply fog manual permanent masks on top
-    for (let i=0;i<Lighting.Model.fogs.length;i++){
-      const f = Lighting.Model.fogs[i];
-      if (f.behavior === 'permanent'){
-        ctx.save(); ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = 'rgba(0,0,0,1)'; ctx.beginPath();
-        const pts = f.points || [];
-        if (pts.length){ ctx.moveTo(pts[0].x, pts[0].y); for (let p=1;p<pts.length;p++) ctx.lineTo(pts[p].x, pts[p].y); ctx.closePath(); ctx.fill(); }
+        // draw handles
+        if (!obj.locked) {
+          this._drawHandles(ctx, obj);
+        }
+
+        // mostra o raio externo da penumbra para lights
+        if (obj.mode === 'light' && obj.shape === 'circle') {
+          ctx.strokeStyle = 'rgba(255,200,100,0.5)';
+          ctx.setLineDash([4, 4]);
+          const penRadius = (obj.penumbra || 12) * (Lighting.Model.gridSize || 50);
+          ctx.beginPath();
+          ctx.arc(obj.x, obj.y, obj.radius + penRadius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
         ctx.restore();
       }
     }
 
-    // Draw explored mask overlay (if any) — reveal explored areas permanently
-    if (Lighting.Model.exploredMask && Lighting.Model.exploredMask.length){
-      ctx.save(); ctx.globalCompositeOperation = 'destination-out';
-      for (let i=0;i<Lighting.Model.exploredMask.length;i++){
-        const poly = Lighting.Model.exploredMask[i];
-        if (!poly || !poly.length) continue; ctx.beginPath(); ctx.moveTo(poly[0].x, poly[0].y); for (let p=1;p<poly.length;p++) ctx.lineTo(poly[p].x, poly[p].y); ctx.closePath(); ctx.fill();
+    // preview de tool em progresso
+    if (activeTool === 'rect' && Lighting.Input.toolState.start && Lighting.Input.toolState.current) {
+      const s = Lighting.Input.toolState;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(80,200,100,0.8)';
+      ctx.fillStyle = 'rgba(80,200,100,0.2)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      const x1 = Math.min(s.start.x, s.current.x);
+      const y1 = Math.min(s.start.y, s.current.y);
+      const w = Math.abs(s.current.x - s.start.x);
+      const h = Math.abs(s.current.y - s.start.y);
+      ctx.fillRect(x1, y1, w, h);
+      ctx.strokeRect(x1, y1, w, h);
+      ctx.restore();
+    }
+
+    if (activeTool === 'circle' && Lighting.Input.toolState.start && Lighting.Input.toolState.current) {
+      const s = Lighting.Input.toolState;
+      const dx = s.current.x - s.start.x;
+      const dy = s.current.y - s.start.y;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(80,200,100,0.8)';
+      ctx.fillStyle = 'rgba(80,200,100,0.2)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(s.start.x, s.start.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if (activeTool === 'polygon' && Lighting.Input.toolState.points) {
+      const pts = Lighting.Input.toolState.points;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(80,200,100,0.8)';
+      ctx.fillStyle = 'rgba(80,200,100,0.2)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      if (pts.length > 0) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) {
+          ctx.lineTo(pts[i].x, pts[i].y);
+        }
+        if (Lighting.Input.toolState.current) {
+          ctx.lineTo(Lighting.Input.toolState.current.x, Lighting.Input.toolState.current.y);
+        }
+        ctx.stroke();
+        // pontos
+        pts.forEach((p) => {
+          ctx.fillStyle = 'rgba(80,200,100,0.9)';
+          ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+        });
       }
       ctx.restore();
     }
-  }
+
+    if (activeTool === 'wall' && Lighting.Input.toolState.p1) {
+      const p1 = Lighting.Input.toolState.p1;
+      const current = Lighting.Input.toolState.current;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(200,100,100,0.8)';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      if (current) {
+        ctx.lineTo(current.x, current.y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+  },
+
+  _drawHandles(ctx, obj) {
+    const handleSize = 8;
+    if (obj.shape === 'rect') {
+      const corners = [
+        [obj.x, obj.y],
+        [obj.x + obj.width, obj.y],
+        [obj.x, obj.y + obj.height],
+        [obj.x + obj.width, obj.y + obj.height],
+      ];
+      corners.forEach((corner) => {
+        ctx.fillStyle = 'rgba(255,220,100,0.9)';
+        ctx.fillRect(corner[0] - handleSize / 2, corner[1] - handleSize / 2, handleSize, handleSize);
+      });
+    } else if (obj.shape === 'circle') {
+      ctx.fillStyle = 'rgba(255,220,100,0.9)';
+      ctx.fillRect(obj.x - handleSize / 2, obj.y - handleSize / 2, handleSize, handleSize);
+      ctx.fillRect(obj.x + obj.radius - handleSize / 2, obj.y - handleSize / 2, handleSize, handleSize);
+    }
+  },
 };
 
-// Auto-init if map exists
-setTimeout(()=>{ Lighting.Render.init(); }, 200);
+setTimeout(() => {
+  Lighting.Render.init();
+}, 300);
 </script>

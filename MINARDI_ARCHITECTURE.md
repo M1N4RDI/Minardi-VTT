@@ -63,14 +63,10 @@ index.html (template)
 ├── <?!= include('audio-ui'); ?>      → <script>...</script>
 ├── <?!= include('audio-main'); ?>    → <script>...</script>
 │
-├── <?!= include('light-model'); ?>   → <script>...</script>
-├── <?!= include('light-raycast'); ?> → <script>...</script>
-├── <?!= include('light-canvas'); ?>  → <script>...</script>
-├── <?!= include('light-fog'); ?>     → <script>...</script>
-├── <?!= include('light-wall'); ?>    → <script>...</script>
-├── <?!= include('light-control'); ?> → <script>...</script>
-├── <?!= include('light-ui'); ?>      → <script>...</script>
-└── <?!= include('light-main'); ?>    → <script>...</script>
+├── <?!= include('lighting-model'); ?>   → <script>...</script>
+├── <?!= include('lighting-render'); ?>  → <script>...</script>
+├── <?!= include('lighting-control'); ?> → <script>...</script>
+├── <?!= include('lighting-ui'); ?>      → <script>...</script>
 │
 └── <?!= include('javascript'); ?>    → <script>...</script> (final, no </body>)
 ```
@@ -111,9 +107,9 @@ z-index  │ Elemento              │ Criado por          │ Conteúdo
    —     │ #map-image / #map-video │ index.html (HTML)  │ Mapa de fundo (img ou vídeo)
    5     │ #grid-canvas          │ index.html (HTML)    │ Grid de quadrados
    8     │ #token-layer          │ token-canvas.js (din)│ Tokens, barras, nomes
-   9     │ #light-fog-canvas     │ light-canvas.js (din)│ Fog of war + iluminação
+   9     │ #lighting-overlay-canvas │ lighting-render.js (din)│ Fog of war + iluminação (overlay)
   10     │ #ui-canvas            │ index.html (HTML)    │ Ferramentas de medição
-  11     │ #light-wall-canvas    │ light-canvas.js (din)│ Preview de paredes (edit)
+  11     │ #lighting-overlay-canvas │ lighting-render.js (din)│ Preview de paredes (edit)
 ```
 
 > `(din)` = criado dinamicamente via JavaScript, não está no HTML original.

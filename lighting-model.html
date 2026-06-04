@@ -1,82 +1,140 @@
 <script>
-// lighting-model.html
-// Modelo simples e persistência do módulo Lighting
-console.log("lighting-model carregado");
+// lighting-model.html — Modelo unificado de iluminação
+// Todos os objetos (dark/light) usam a mesma estrutura
+console.log('lighting-model carregado');
 
 window.Lighting = window.Lighting || {};
 Lighting.Model = {
-  gridSize: 50, // padrão (em px) — sempre usar unidades de grid para raios
-
-  walls: [],     // [{id, p1:{x,y}, p2:{x,y}}]
-  lights: [],    // [{id, name, x, y, rLight, rPenumbra, type:'fixed'|'token', tokenId:null}]
-  fogs: [],      // [{id, type:'poly'|'rect', points:[], behavior:'permanent'|'explored'}]
-
-  exploredMask: [], // lista de polygons acumulados quando modo explorado
-
+  gridSize: 50,
+  objects: [], // [{ id, name, shape, mode, locked, visible, ... }]
+  walls: [], // [{ id, p1, p2, locked, visible }]
   _nextId: 1,
+  masterReveal: false,
 
-  // CRUD
-  addWall(p1, p2) {
+  // CRUD objeto genérico (dark/light/shape independente)
+  addObject(props) {
     const id = this._nextId++;
-    const w = { id, p1, p2 };
-    this.walls.push(w);
-    return w;
+    const obj = Object.assign({
+      id,
+      name: props.name || 'Objeto',
+      shape: props.shape || 'rect', // rect, circle, polygon
+      mode: props.mode || 'dark', // dark, light
+      locked: false,
+      visible: true,
+      lightSource: props.lightSource || false,
+      // coordenadas dependem do shape
+      x: props.x || 0,
+      y: props.y || 0,
+      // rect/circle
+      width: props.width || 100,
+      height: props.height || 100,
+      radius: props.radius || 50,
+      // light properties (só para mode='light')
+      luminosity: props.luminosity || 6,
+      penumbra: props.penumbra || 12,
+      // polygon
+      points: props.points || [],
+    }, props);
+    this.objects.push(obj);
+    return obj;
   },
 
-  removeWall(id) { this.walls = this.walls.filter(w => w.id !== id); },
-
-  addLight(props) {
-    const id = this._nextId++;
-    const l = Object.assign({ id, name: 'Luz', x:0,y:0, rLight:6, rPenumbra:12, type:'fixed', tokenId:null }, props);
-    this.lights.push(l);
-    return l;
-  },
-
-  updateLight(id, props) {
-    const idx = this.lights.findIndex(l => l.id === id);
+  updateObject(id, updates) {
+    const idx = this.objects.findIndex(o => o.id === id);
     if (idx === -1) return null;
-    this.lights[idx] = Object.assign({}, this.lights[idx], props);
-    return this.lights[idx];
+    this.objects[idx] = Object.assign({}, this.objects[idx], updates);
+    return this.objects[idx];
   },
 
-  removeLight(id) { this.lights = this.lights.filter(l => l.id !== id); },
+  removeObject(id) {
+    this.objects = this.objects.filter(o => o.id !== id);
+  },
 
-  addFog(f) { f.id = this._nextId++; this.fogs.push(f); return f; },
-  removeFog(id) { this.fogs = this.fogs.filter(f => f.id !== id); },
+  getObject(id) {
+    return this.objects.find(o => o.id === id);
+  },
 
-  // Explored mask accumulation — recebe polygon (array of pts) em px
-  accumulateExplored(poly) { this.exploredMask.push(poly); },
+  // Paredes (geometria simples)
+  addWall(p1, p2, opts = {}) {
+    const id = this._nextId++;
+    const wall = Object.assign({
+      id,
+      p1,
+      p2,
+      locked: false,
+      visible: true,
+    }, opts);
+    this.walls.push(wall);
+    return wall;
+  },
 
-  // Persistence (GAS friendly: serialize to JSON)
+  removeWall(id) {
+    this.walls = this.walls.filter(w => w.id !== id);
+  },
+
+  getWall(id) {
+    return this.walls.find(w => w.id === id);
+  },
+
+  // Utilitários
+  toggleObjectMode(id) {
+    const obj = this.getObject(id);
+    if (!obj) return null;
+    const newMode = obj.mode === 'dark' ? 'light' : 'dark';
+    return this.updateObject(id, { mode: newMode });
+  },
+
+  toggleObjectLocked(id) {
+    const obj = this.getObject(id);
+    if (!obj) return null;
+    return this.updateObject(id, { locked: !obj.locked });
+  },
+
+  duplicateObject(id) {
+    const orig = this.getObject(id);
+    if (!orig) return null;
+    const copy = Object.assign({}, orig);
+    copy.id = this._nextId++;
+    copy.name = 'Cópia de ' + orig.name;
+    copy.x += this.gridSize * 0.5;
+    copy.y += this.gridSize * 0.5;
+    if (copy.points) copy.points = copy.points.map(p => ({ x: p.x, y: p.y }));
+    this.objects.push(copy);
+    return copy;
+  },
+
+  // Persistência
   _save() {
     try {
-      const payload = JSON.stringify({ walls: this.walls, lights: this.lights, fogs: this.fogs, explored: this.exploredMask });
-      // storage backend: localStorage for now; callers can override to use GAS
-      localStorage.setItem('lighting_state', payload);
-      // se disponível, persiste via GAS
+      const payload = JSON.stringify({
+        objects: this.objects,
+        walls: this.walls,
+        masterReveal: this.masterReveal,
+      });
+      localStorage.setItem('lighting_state_v3', payload);
       try {
-        if (window.google && google.script && google.script.run && typeof google.script.run.saveLightingState === 'function') {
-          google.script.run.withFailureHandler(err=>console.warn('GAS save failed', err)).saveLightingState(payload);
+        if (window.google?.script?.run?.saveLightingState) {
+          google.script.run.withFailureHandler(() => {}).saveLightingState(payload);
         }
-      } catch(e) {
-        // ignore — ambiente não GAS
-      }
-    } catch (e) { console.warn('Lighting save failed', e); }
+      } catch (e) {}
+    } catch (e) {
+      console.warn('Lighting save failed', e);
+    }
   },
 
   _load() {
     try {
-      const raw = localStorage.getItem('lighting_state');
+      const raw = localStorage.getItem('lighting_state_v3');
       if (!raw) return;
       const s = JSON.parse(raw);
+      this.objects = s.objects || [];
       this.walls = s.walls || [];
-      this.lights = s.lights || [];
-      this.fogs = s.fogs || [];
-      this.exploredMask = s.explored || [];
-    } catch (e) { console.warn('Lighting load failed', e); }
-  }
+      this.masterReveal = s.masterReveal || false;
+    } catch (e) {
+      console.warn('Lighting load failed', e);
+    }
+  },
 };
 
-// Carrega instantaneamente se disponível
 Lighting.Model._load();
 </script>

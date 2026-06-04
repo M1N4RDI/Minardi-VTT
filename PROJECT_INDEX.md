@@ -86,18 +86,14 @@
 
 ---
 
-## Módulo Iluminação (7 arquivos)
+## Módulo Iluminação (novo — Lighting)
 
 | Arquivo | Tamanho | Descrição |
 |---|---|---|
-| `light-main.html` | 2,8 KB | Boot do plugin. Aguarda `map-container`, `VTTMode` e `TokenPlugin`. Inicializa: Model → Canvas → Fog → Wall → Control → UI. Faz patch tardio de `Canvas.drawFogPreview`. |
-| `light-model.html` | 5,1 KB | Fonte da verdade do sistema de luz. Gerencia `darknessObjects[]`, `lightObjects[]`, `wallObjects[]`, `settings` globais. Método `getTokenLightSources()` converte tokens com luz em fontes sintéticas. Persistência em `localStorage` (`vtt_light_v2`). |
-| `light-canvas.html` | 7,8 KB | Renderização do fog of war. Dois canvas: `#light-fog-canvas` (z:9, fog + luz) e `#light-wall-canvas` (z:11, preview de edição). Pipeline de redraw: escuridão base → cortes por objetos de luz (`destination-out`) → raycasting → escuridão manual por cima → overlay de mestre. |
-| `light-raycast.html` | 4,2 KB | Algoritmo de visibilidade. Dado um ponto de origem e lista de paredes, retorna polígono de visibilidade. Implementa: construção de segmentos + bounding box, coleta de ângulos nos vértices (±0.0001 rad), ray casting com interseção raio-segmento, ordenação angular. |
-| `light-fog.html` | 4,8 KB | Subsistema de objetos de escuridão manual. Suporta formas retangulares e circulares. Modos: draw (clicar e arrastar), select+move, erase. Hit-testing por ordem inversa de inserção. |
-| `light-wall.html` | 5,4 KB | Subsistema de paredes. Suporta: desenhar segmento (click → click), selecionar parede, arrastar vértice individualmente, apagar por clique direito ou modo erase. Hit-testing de vértice (raio 7px) e de segmento (threshold 8px). |
-| `light-control.html` | 4,7 KB | Máquina de estados do LightPlugin. State: `{ cat, fmt, fn }`. Controla integração com `VTTMode`, tecla `L` (master reveal), `Escape` (sair do modo iluminação), debounce de redraw via `requestAnimationFrame`. Observer de tokens com luz a 120ms. |
-| `light-ui.html` | 24,8 KB | Interface: seção "Iluminação" na sidebar, painel flutuante com toolbar (categoria/formato/função), listas de objetos de escuridão/luz/paredes, propriedades de objetos selecionados, controles de opacity e configurações globais. Injeta item no context menu dos tokens. |
+| `lighting-model.html` | 2.5 KB | Fonte da verdade do sistema de iluminação: arrays `walls[]`, `lights[]`, `fogs[]`. Usa unidades de grid para raios e fornece `_save()`/_load() com fallback para `localStorage` e integração com GAS via `saveLightingState`/`getLightingState`. |
+| `lighting-render.html` | 6.0 KB | Renderização do fog of war usando Visibility Polygon (raycasting por vértices) e overlay `#lighting-overlay-canvas`. Inclui um spatial index (quadtree-like) para acelerar interseções. Pipeline: escuridão → penumbra (cinza) → luz (revelado) → fog manual → explored (acumulado). |
+| `lighting-control.html` | 2.0 KB | API pública: criar/editar/remover luzes e paredes em unidades de grid, `toggleTokenLight(tokenId)`, `attachTokenMovementPolling()` para sincronizar lights vinculadas a tokens sem depender de eventos externos. |
+| `lighting-ui.html` | 1.2 KB | Painel administrativo leve: criar luz no centro, listar/remover luzes. Modo de edição (criar parede e criar luz por clique) disponível para mestre. |
 
 ---
 

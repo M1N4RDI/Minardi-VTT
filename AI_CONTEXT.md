@@ -33,14 +33,10 @@ audio-player.html ← Motor de reprodução (<audio>)
 audio-control.html← Lógica de playlists e controle
 audio-ui.html     ← Sidebar e painel flutuante de áudio
 
-light-main.html   ← Boot do LightPlugin
-light-model.html  ← Dados: escuridão, luz, paredes, settings
-light-canvas.html ← Fog of war (destination-out rendering)
-light-raycast.html← Algoritmo de visibilidade (visibility polygon)
-light-fog.html    ← Objetos de escuridão manual
-light-wall.html   ← Sistema de paredes
-light-control.html← Máquina de estados (cat/fmt/fn)
-light-ui.html     ← Painel e sidebar de iluminação
+lighting-model.html  ← Modelo: walls/lights/fogs (em unidades de grid, persistência local+GAS)
+lighting-render.html ← Renderização (visibility polygon + overlay canvas)
+lighting-control.html← API pública (criar/remover luzes/paredes, toggle token light)
+lighting-ui.html     ← Painel admin mínimo para criar/listar/remover luzes
 ```
 
 ---

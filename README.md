@@ -219,14 +219,10 @@ VTT Minardi 3.0/
 ├── audio-player.html    # Motor de reprodução
 ├── audio-control.html   # Lógica de controle de áudio
 ├── audio-ui.html        # UI de áudio (sidebar + painel)
-├── light-main.html      # Boot do módulo Iluminação
-├── light-model.html     # Dados de luz, paredes, escuridão
-├── light-canvas.html    # Renderização do fog of war
-├── light-raycast.html   # Algoritmo de raycasting
-├── light-fog.html       # Objetos de escuridão manual
-├── light-wall.html      # Sistema de paredes
-├── light-control.html   # Máquina de estados da iluminação
-└── light-ui.html        # UI de iluminação (sidebar + painel)
+├── lighting-model.html  # Dados de luz, paredes, escuridão
+├── lighting-render.html # Renderização do fog of war + visibility polygon
+├── lighting-control.html# API de controle (grid units)
+└── lighting-ui.html     # UI de iluminação (sidebar + painel)
 ```
 
 ---

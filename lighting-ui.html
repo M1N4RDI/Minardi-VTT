@@ -1,50 +1,503 @@
 <script>
-// lighting-ui.html — painel simples para gerenciar Lighting (admin)
+// lighting-ui.html — UI completa do sistema de iluminação
 console.log('lighting-ui carregado');
-(function(){
-  function buildPanel(){
-    const sidebar = document.getElementById('sidebar');
-    if (!sidebar) return;
-    const cat = document.createElement('div'); cat.className='category';
-    const title = document.createElement('div'); title.className='category-title'; title.innerText='Lighting'; cat.appendChild(title);
 
-    const group = document.createElement('div'); group.className='control-group';
+window.Lighting = window.Lighting || {};
+Lighting.UI = {
+  initialized: false,
+  sidebar: null,
+  toolButtons: {},
+  contextMenu: null,
 
-    const createBtn = document.createElement('button'); createBtn.innerText='➕ Criar Luz (no centro da tela)';
-    createBtn.style.cssText='width:100%;padding:8px;margin-top:6px;';
-    createBtn.onclick = ()=>{
-      const canvas = document.getElementById('map-container');
-      const rect = canvas.getBoundingClientRect();
-      const gs = Lighting.Model.gridSize || 50;
-      const gx = Math.floor((rect.width/2) / gs);
-      const gy = Math.floor((rect.height/2) / gs);
-      Lighting.Control.createLightAtGrid(gx, gy);
-      renderList();
-    };
+  init() {
+    if (this.initialized) return;
+    this.initialized = true;
 
-    const list = document.createElement('div'); list.style.marginTop='8px';
+    setTimeout(() => {
+      const sidebar = document.getElementById('sidebar');
+      if (!sidebar) {
+        setTimeout(() => this.init(), 200);
+        return;
+      }
 
-    function renderList(){
-      list.innerHTML='';
-      Lighting.Model.lights.forEach(l=>{
-        const el = document.createElement('div'); el.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:6px;border-bottom:1px solid #222;';
-        el.innerHTML = `<div style="font-size:13px;color:#eee;">${l.name} — (${Math.round(l.x)},${Math.round(l.y)})</div>`;
-        const controls = document.createElement('div');
-        const del = document.createElement('button'); del.innerText='❌'; del.style.cssText='margin-left:6px;'; del.onclick=()=>{ Lighting.Model.removeLight(l.id); Lighting.Model._save(); Lighting.Render.draw(); renderList(); };
-        controls.appendChild(del);
-        el.appendChild(controls);
-        list.appendChild(el);
+      this.sidebar = sidebar;
+      this._createPanel();
+      
+      // force lighting mode
+      if (window.VTTMode && typeof VTTMode.set === 'function') {
+        VTTMode.set('lighting');
+      }
+
+      Lighting.Input.init();
+      Lighting.Render.init();
+      this.refresh();
+    }, 500);
+  },
+
+  _createPanel() {
+    const cat = document.createElement('div');
+    cat.className = 'category';
+    cat.id = 'lighting-panel';
+
+    const title = document.createElement('div');
+    title.className = 'category-title';
+    title.innerText = 'Iluminação';
+    cat.appendChild(title);
+
+    // FERRAMENTAS
+    const toolsSection = document.createElement('div');
+    toolsSection.style.marginBottom = '16px';
+
+    const toolsLabel = document.createElement('div');
+    toolsLabel.style.fontSize = '0.8em';
+    toolsLabel.style.fontWeight = 'bold';
+    toolsLabel.style.marginBottom = '8px';
+    toolsLabel.innerText = 'FERRAMENTAS';
+    toolsSection.appendChild(toolsLabel);
+
+    const toolGrid = document.createElement('div');
+    toolGrid.style.display = 'grid';
+    toolGrid.style.gridTemplateColumns = 'repeat(5, 1fr)';
+    toolGrid.style.gap = '6px';
+
+    const tools = [
+      { id: 'select', icon: '🖱', title: 'Selecionar' },
+      { id: 'rect', icon: '⬜', title: 'Retângulo' },
+      { id: 'circle', icon: '⚪', title: 'Círculo' },
+      { id: 'polygon', icon: '⬡', title: 'Polígono' },
+      { id: 'wall', icon: '🚧', title: 'Parede' },
+    ];
+
+    tools.forEach((tool) => {
+      const btn = document.createElement('button');
+      btn.className = 'lighting-tool-btn';
+      btn.title = tool.title;
+      btn.innerHTML = tool.icon;
+      btn.style.cssText =
+        'padding:12px;font-size:1.2em;border:2px solid transparent;border-radius:6px;background:rgba(100,100,100,0.3);cursor:pointer;transition:all 0.2s;';
+      btn.addEventListener('click', () => {
+        Lighting.Input.setActiveTool(tool.id);
+        this._updateToolButtons();
+        Lighting.Render.draw();
       });
+      this.toolButtons[tool.id] = btn;
+      toolGrid.appendChild(btn);
+    });
+
+    toolsSection.appendChild(toolGrid);
+    cat.appendChild(toolsSection);
+
+    // AÇÕES GLOBAIS
+    const actionsSection = document.createElement('div');
+    actionsSection.style.marginBottom = '16px';
+
+    const actionsLabel = document.createElement('div');
+    actionsLabel.style.fontSize = '0.8em';
+    actionsLabel.style.fontWeight = 'bold';
+    actionsLabel.style.marginBottom = '8px';
+    actionsLabel.innerText = 'AÇÕES';
+    actionsSection.appendChild(actionsLabel);
+
+    const actionsGrid = document.createElement('div');
+    actionsGrid.style.display = 'grid';
+    actionsGrid.style.gap = '6px';
+
+    const coverBtn = this._createActionButton('🌑 Cobrir Mapa', () => {
+      Lighting.Model.addObject({
+        name: 'Mapa Coberto',
+        shape: 'rect',
+        x: 0,
+        y: 0,
+        width: 99999,
+        height: 99999,
+      });
+      Lighting.Model._save();
+      this.refresh();
+      Lighting.Render.draw();
+    });
+    actionsGrid.appendChild(coverBtn);
+
+    const revealBtn = this._createActionButton('☀ Mostrar Tudo', () => {
+      Lighting.Model.masterReveal = !Lighting.Model.masterReveal;
+      Lighting.Render.draw();
+      revealBtn.style.opacity = Lighting.Model.masterReveal ? '1' : '0.7';
+    });
+    actionsGrid.appendChild(revealBtn);
+
+    actionsSection.appendChild(actionsGrid);
+    cat.appendChild(actionsSection);
+
+    // LISTA DE OBJETOS
+    const listSection = document.createElement('div');
+    listSection.style.marginBottom = '16px';
+
+    const listLabel = document.createElement('div');
+    listLabel.style.fontSize = '0.8em';
+    listLabel.style.fontWeight = 'bold';
+    listLabel.style.marginBottom = '8px';
+    listLabel.innerText = 'OBJETOS';
+    listSection.appendChild(listLabel);
+
+    const objectList = document.createElement('div');
+    objectList.id = 'lighting-object-list';
+    objectList.style.maxHeight = '200px';
+    objectList.style.overflowY = 'auto';
+    objectList.style.fontSize = '0.85em';
+    listSection.appendChild(objectList);
+
+    cat.appendChild(listSection);
+
+    // PAINEL DE PROPRIEDADES
+    const propsSection = document.createElement('div');
+
+    const propsLabel = document.createElement('div');
+    propsLabel.style.fontSize = '0.8em';
+    propsLabel.style.fontWeight = 'bold';
+    propsLabel.style.marginBottom = '8px';
+    propsLabel.innerText = 'PROPRIEDADES';
+    propsSection.appendChild(propsLabel);
+
+    const propPanel = document.createElement('div');
+    propPanel.id = 'lighting-props-panel';
+    propPanel.style.fontSize = '0.85em';
+    propsSection.appendChild(propPanel);
+
+    cat.appendChild(propsSection);
+
+    this.sidebar.appendChild(cat);
+  },
+
+  _createActionButton(label, action) {
+    const btn = document.createElement('button');
+    btn.className = 'btn-full';
+    btn.innerText = label;
+    btn.addEventListener('click', action);
+    return btn;
+  },
+
+  _updateToolButtons() {
+    const active = Lighting.Input.activeTool;
+    Object.keys(this.toolButtons).forEach((key) => {
+      const btn = this.toolButtons[key];
+      if (key === active) {
+        btn.style.background = 'rgba(150,200,255,0.6)';
+        btn.style.borderColor = 'rgba(200,230,255,0.8)';
+      } else {
+        btn.style.background = 'rgba(100,100,100,0.3)';
+        btn.style.borderColor = 'transparent';
+      }
+    });
+  },
+
+  refresh() {
+    this._updateToolButtons();
+    this._renderObjectList();
+    this._renderProperties();
+  },
+
+  _renderObjectList() {
+    const listEl = document.getElementById('lighting-object-list');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+
+    const darkObjs = Lighting.Model.objects.filter((o) => o.mode === 'dark');
+    const lightObjs = Lighting.Model.objects.filter((o) => o.mode === 'light');
+
+    if (darkObjs.length > 0) {
+      this._createListGroup(listEl, '▼ Áreas Escuras', darkObjs);
     }
 
-    group.appendChild(createBtn);
-    group.appendChild(list);
-    cat.appendChild(group);
-    sidebar.appendChild(cat);
-    renderList();
-  }
+    if (lightObjs.length > 0) {
+      this._createListGroup(listEl, '▼ Áreas Iluminadas', lightObjs);
+    }
 
-  // delay para garantir sidebar
-  setTimeout(buildPanel, 300);
-})();
+    if (Lighting.Model.walls.length > 0) {
+      this._createWallGroup(listEl);
+    }
+
+    if (!darkObjs.length && !lightObjs.length && !Lighting.Model.walls.length) {
+      const empty = document.createElement('div');
+      empty.style.opacity = '0.6';
+      empty.innerText = 'Nenhum objeto.';
+      listEl.appendChild(empty);
+    }
+  },
+
+  _createListGroup(parent, label, objects) {
+    const group = document.createElement('div');
+    group.style.marginBottom = '8px';
+
+    const header = document.createElement('div');
+    header.style.fontWeight = 'bold';
+    header.style.fontSize = '0.8em';
+    header.style.marginBottom = '4px';
+    header.innerText = label;
+    group.appendChild(header);
+
+    objects.forEach((obj) => {
+      const item = document.createElement('div');
+      item.style.padding = '6px';
+      item.style.borderRadius = '4px';
+      item.style.background = Lighting.Input.selectedObjectId === obj.id ? 'rgba(100,150,200,0.3)' : 'transparent';
+      item.style.cursor = 'pointer';
+      item.style.fontSize = '0.85em';
+      item.innerText = obj.name;
+      item.addEventListener('click', () => {
+        Lighting.Input.selectedObjectId = obj.id;
+        this.refresh();
+        Lighting.Render.draw();
+      });
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        this.showContextMenu(obj.id, { x: e.clientX, y: e.clientY });
+      });
+      group.appendChild(item);
+    });
+
+    parent.appendChild(group);
+  },
+
+  _createWallGroup(parent) {
+    const group = document.createElement('div');
+    group.style.marginBottom = '8px';
+
+    const header = document.createElement('div');
+    header.style.fontWeight = 'bold';
+    header.style.fontSize = '0.8em';
+    header.style.marginBottom = '4px';
+    header.innerText = '▼ Paredes';
+    group.appendChild(header);
+
+    Lighting.Model.walls.forEach((wall, idx) => {
+      const item = document.createElement('div');
+      item.style.padding = '6px';
+      item.style.borderRadius = '4px';
+      item.style.background = 'transparent';
+      item.style.fontSize = '0.85em';
+      item.innerText = `Parede ${idx + 1}`;
+      group.appendChild(item);
+    });
+
+    parent.appendChild(group);
+  },
+
+  _renderProperties() {
+    const propsEl = document.getElementById('lighting-props-panel');
+    if (!propsEl) return;
+    propsEl.innerHTML = '';
+
+    const selectedId = Lighting.Input.selectedObjectId;
+    if (!selectedId) {
+      const nosel = document.createElement('div');
+      nosel.style.opacity = '0.7';
+      nosel.innerText = 'Selecione um objeto.';
+      propsEl.appendChild(nosel);
+      return;
+    }
+
+    const obj = Lighting.Model.getObject(selectedId);
+    if (!obj) return;
+
+    // Nome
+    this._createPropField(propsEl, 'Nome', obj.name, (val) => {
+      Lighting.Model.updateObject(obj.id, { name: val });
+      Lighting.Model._save();
+      this._renderObjectList();
+    });
+
+    // Tipo
+    const typeRow = document.createElement('div');
+    typeRow.style.marginBottom = '8px';
+    const typeLabel = document.createElement('label');
+    typeLabel.innerText = 'Tipo';
+    typeRow.appendChild(typeLabel);
+    const typeDiv = document.createElement('div');
+    typeDiv.style.fontSize = '0.85em';
+    typeDiv.innerText = obj.mode === 'dark' ? 'Área Escura' : 'Área Iluminada';
+    typeRow.appendChild(typeDiv);
+    propsEl.appendChild(typeRow);
+
+    // Forma
+    const shapeRow = document.createElement('div');
+    shapeRow.style.marginBottom = '8px';
+    const shapeLabel = document.createElement('label');
+    shapeLabel.innerText = 'Forma';
+    shapeRow.appendChild(shapeLabel);
+    const shapeDiv = document.createElement('div');
+    shapeDiv.style.fontSize = '0.85em';
+    const shapeNames = { rect: 'Retângulo', circle: 'Círculo', polygon: 'Polígono' };
+    shapeDiv.innerText = shapeNames[obj.shape] || obj.shape;
+    shapeRow.appendChild(shapeDiv);
+    propsEl.appendChild(shapeRow);
+
+    // Bloqueada
+    const lockedRow = document.createElement('div');
+    lockedRow.style.marginBottom = '8px';
+    const lockedLabel = document.createElement('label');
+    lockedLabel.innerText = 'Bloqueada';
+    lockedRow.appendChild(lockedLabel);
+    const lockedCheckbox = document.createElement('input');
+    lockedCheckbox.type = 'checkbox';
+    lockedCheckbox.checked = obj.locked;
+    lockedCheckbox.addEventListener('change', () => {
+      Lighting.Model.updateObject(obj.id, { locked: lockedCheckbox.checked });
+      Lighting.Model._save();
+      this.refresh();
+    });
+    lockedRow.appendChild(lockedCheckbox);
+    propsEl.appendChild(lockedRow);
+
+    // Propriedades específicas de LIGHT
+    if (obj.mode === 'light') {
+      this._createPropField(propsEl, 'Luminosidade (grid)', obj.luminosity || 6, (val) => {
+        Lighting.Model.updateObject(obj.id, { luminosity: Number(val) || 1 });
+        Lighting.Model._save();
+        Lighting.Render.draw();
+      }, 'number');
+
+      this._createPropField(propsEl, 'Penumbra (grid)', obj.penumbra || 12, (val) => {
+        Lighting.Model.updateObject(obj.id, { penumbra: Number(val) || 0 });
+        Lighting.Model._save();
+        Lighting.Render.draw();
+      }, 'number');
+    }
+
+    // Botões de ação
+    const buttonRow = document.createElement('div');
+    buttonRow.style.display = 'grid';
+    buttonRow.style.gridTemplateColumns = '1fr 1fr';
+    buttonRow.style.gap = '6px';
+    buttonRow.style.marginTop = '10px';
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'btn-full';
+    toggleBtn.style.fontSize = '0.75em';
+    toggleBtn.innerText = obj.mode === 'dark' ? 'Iluminar' : 'Escurecer';
+    toggleBtn.addEventListener('click', () => {
+      Lighting.Model.toggleObjectMode(obj.id);
+      Lighting.Model._save();
+      this.refresh();
+      Lighting.Render.draw();
+    });
+    buttonRow.appendChild(toggleBtn);
+
+    const dupBtn = document.createElement('button');
+    dupBtn.className = 'btn-full';
+    dupBtn.style.fontSize = '0.75em';
+    dupBtn.innerText = 'Duplicar';
+    dupBtn.addEventListener('click', () => {
+      Lighting.Model.duplicateObject(obj.id);
+      Lighting.Model._save();
+      this.refresh();
+      Lighting.Render.draw();
+    });
+    buttonRow.appendChild(dupBtn);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn-full';
+    delBtn.style.fontSize = '0.75em';
+    delBtn.style.gridColumn = '1 / -1';
+    delBtn.innerText = 'Excluir';
+    delBtn.addEventListener('click', () => {
+      Lighting.Model.removeObject(obj.id);
+      Lighting.Model._save();
+      Lighting.Input.selectedObjectId = null;
+      this.refresh();
+      Lighting.Render.draw();
+    });
+    buttonRow.appendChild(delBtn);
+
+    propsEl.appendChild(buttonRow);
+  },
+
+  _createPropField(parent, label, value, onChange, type = 'text') {
+    const row = document.createElement('div');
+    row.style.marginBottom = '8px';
+
+    const lbl = document.createElement('label');
+    lbl.innerText = label;
+    row.appendChild(lbl);
+
+    const input = document.createElement('input');
+    input.type = type;
+    input.value = value;
+    input.addEventListener('change', (e) => onChange(e.target.value));
+    row.appendChild(input);
+
+    parent.appendChild(row);
+  },
+
+  showContextMenu(objId, pos) {
+    const obj = Lighting.Model.getObject(objId);
+    if (!obj) return;
+
+    if (this.contextMenu) this.contextMenu.remove();
+
+    const menu = document.createElement('div');
+    menu.style.cssText = `
+      position: fixed;
+      left: ${pos.x}px;
+      top: ${pos.y}px;
+      background: rgba(30,30,30,0.95);
+      border: 1px solid rgba(200,200,200,0.3);
+      border-radius: 6px;
+      padding: 4px;
+      z-index: 10000;
+      font-size: 0.85em;
+      min-width: 180px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    `;
+
+    const items = [
+      { icon: '✏️', label: 'Renomear', action: () => this._renameObject(obj) },
+      { icon: obj.mode === 'dark' ? '💡' : '🌑', label: obj.mode === 'dark' ? 'Iluminar' : 'Escurecer', action: () => { Lighting.Model.toggleObjectMode(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); } },
+      { icon: obj.locked ? '🔓' : '🔒', label: obj.locked ? 'Desbloquear' : 'Bloquear', action: () => { Lighting.Model.toggleObjectLocked(obj.id); Lighting.Model._save(); this.refresh(); } },
+      { icon: '⧉', label: 'Duplicar', action: () => { Lighting.Model.duplicateObject(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); } },
+      { icon: '🗑', label: 'Excluir', action: () => { Lighting.Model.removeObject(obj.id); Lighting.Model._save(); Lighting.Input.selectedObjectId = null; this.refresh(); Lighting.Render.draw(); } },
+    ];
+
+    items.forEach((item) => {
+      const btn = document.createElement('button');
+      btn.style.cssText = `
+        display: block;
+        width: 100%;
+        background: transparent;
+        border: none;
+        color: #ccc;
+        padding: 8px;
+        text-align: left;
+        cursor: pointer;
+        border-radius: 4px;
+      `;
+      btn.innerHTML = `${item.icon} ${item.label}`;
+      btn.addEventListener('mouseover', () => (btn.style.background = 'rgba(100,100,100,0.3)'));
+      btn.addEventListener('mouseout', () => (btn.style.background = 'transparent'));
+      btn.addEventListener('click', () => {
+        item.action();
+        menu.remove();
+      });
+      menu.appendChild(btn);
+    });
+
+    document.body.appendChild(menu);
+    this.contextMenu = menu;
+
+    document.addEventListener('click', () => {
+      if (this.contextMenu) this.contextMenu.remove();
+    });
+  },
+
+  _renameObject(obj) {
+    const newName = prompt('Novo nome:', obj.name);
+    if (newName) {
+      Lighting.Model.updateObject(obj.id, { name: newName });
+      Lighting.Model._save();
+      this.refresh();
+    }
+  },
+};
+
+setTimeout(() => {
+  Lighting.UI.init();
+}, 700);
 </script>

@@ -1,0 +1,302 @@
+<script>
+// lighting-input.html — InputManager centralizado para Lighting
+console.log('lighting-input carregado');
+
+window.Lighting = window.Lighting || {};
+Lighting.Input = {
+  initialized: false,
+  canvas: null,
+  activeTool: 'select', // select, rect, circle, polygon, wall
+  selectedObjectId: null,
+  draggingId: null,
+  dragOffset: null,
+  toolState: {}, // estado temporário da ferramenta ativa
+  contextMenu: null,
+  contextPos: null,
+
+  init() {
+    if (this.initialized) return;
+    this.initialized = true;
+
+    setTimeout(() => {
+      const map = document.getElementById('map-container');
+      if (!map) {
+        setTimeout(() => this.init(), 200);
+        return;
+      }
+
+      let canvas = document.getElementById('lighting-interaction-canvas');
+      if (!canvas) {
+        canvas = document.createElement('canvas');
+        canvas.id = 'lighting-interaction-canvas';
+        canvas.style.cssText =
+          'position:absolute;top:0;left:0;width:100%;height:100%;z-index:1002;pointer-events:auto;background:transparent;cursor:crosshair;';
+        map.appendChild(canvas);
+      }
+
+      this.canvas = canvas;
+      this._syncCanvas();
+      this._attachEvents();
+
+      window.addEventListener('resize', () => this._syncCanvas());
+    }, 300);
+  },
+
+  _syncCanvas() {
+    if (!this.canvas) return;
+    const map = document.getElementById('map-container');
+    if (!map) return;
+    const rect = map.getBoundingClientRect();
+    this.canvas.width = rect.width;
+    this.canvas.height = rect.height;
+  },
+
+  _attachEvents() {
+    if (!this.canvas) return;
+    this.canvas.addEventListener('mousedown', (e) => this._onMouseDown(e));
+    this.canvas.addEventListener('mousemove', (e) => this._onMouseMove(e));
+    this.canvas.addEventListener('mouseup', (e) => this._onMouseUp(e));
+    this.canvas.addEventListener('dblclick', (e) => this._onDoubleClick(e));
+    this.canvas.addEventListener('contextmenu', (e) => this._onContextMenu(e));
+  },
+
+  setActiveTool(tool) {
+    this.activeTool = tool;
+    this.toolState = {};
+    if (this.canvas) {
+      this.canvas.style.cursor = tool === 'select' ? 'pointer' : 'crosshair';
+    }
+  },
+
+  _getPoint(e) {
+    const rect = this.canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  },
+
+  _onMouseDown(e) {
+    if (!window.VTTMode || !VTTMode.is('lighting')) return;
+    const point = this._getPoint(e);
+
+    if (this.activeTool === 'select') {
+      const hit = this._hitTest(point);
+      if (hit) {
+        this.selectedObjectId = hit;
+        this.draggingId = hit;
+        const obj = Lighting.Model.getObject(hit);
+        if (obj && !obj.locked) {
+          this.dragOffset = { x: obj.x - point.x, y: obj.y - point.y };
+        }
+        Lighting.Render.draw();
+      } else {
+        this.selectedObjectId = null;
+        this.draggingId = null;
+        Lighting.Render.draw();
+      }
+      return;
+    }
+
+    if (this.activeTool === 'rect') {
+      this.toolState.start = point;
+      return;
+    }
+
+    if (this.activeTool === 'circle') {
+      this.toolState.start = point;
+      return;
+    }
+
+    if (this.activeTool === 'polygon') {
+      if (!this.toolState.points) this.toolState.points = [];
+      this.toolState.points.push({ x: point.x, y: point.y });
+      Lighting.Render.draw();
+      return;
+    }
+
+    if (this.activeTool === 'wall') {
+      if (!this.toolState.p1) {
+        this.toolState.p1 = point;
+      } else {
+        Lighting.Model.addWall(this.toolState.p1, point);
+        Lighting.Model._save();
+        Lighting.Render.buildSpatialIndex();
+        Lighting.Render.draw();
+        this.setActiveTool('select');
+      }
+      return;
+    }
+  },
+
+  _onMouseMove(e) {
+    if (!window.VTTMode || !VTTMode.is('lighting')) return;
+    const point = this._getPoint(e);
+
+    if (this.activeTool === 'select' && this.draggingId && this.dragOffset) {
+      const obj = Lighting.Model.getObject(this.draggingId);
+      if (obj && !obj.locked) {
+        Lighting.Model.updateObject(this.draggingId, {
+          x: point.x + this.dragOffset.x,
+          y: point.y + this.dragOffset.y,
+        });
+        Lighting.Render.draw();
+      }
+      return;
+    }
+
+    if (this.activeTool === 'rect' && this.toolState.start) {
+      this.toolState.current = point;
+      Lighting.Render.draw();
+      return;
+    }
+
+    if (this.activeTool === 'circle' && this.toolState.start) {
+      this.toolState.current = point;
+      Lighting.Render.draw();
+      return;
+    }
+
+    if (this.activeTool === 'wall' && this.toolState.p1) {
+      this.toolState.current = point;
+      Lighting.Render.draw();
+      return;
+    }
+
+    if (this.activeTool === 'polygon' && this.toolState.points) {
+      this.toolState.current = point;
+      Lighting.Render.draw();
+      return;
+    }
+
+    Lighting.Render.draw();
+  },
+
+  _onMouseUp(e) {
+    if (!window.VTTMode || !VTTMode.is('lighting')) return;
+    const point = this._getPoint(e);
+
+    if (this.activeTool === 'rect' && this.toolState.start) {
+      const x1 = Math.min(this.toolState.start.x, point.x);
+      const y1 = Math.min(this.toolState.start.y, point.y);
+      const w = Math.abs(point.x - this.toolState.start.x);
+      const h = Math.abs(point.y - this.toolState.start.y);
+      if (w > 10 && h > 10) {
+        Lighting.Model.addObject({
+          name: 'Retângulo',
+          shape: 'rect',
+          x: x1,
+          y: y1,
+          width: w,
+          height: h,
+        });
+        Lighting.Model._save();
+      }
+      this.toolState = {};
+      this.setActiveTool('select');
+      Lighting.Render.draw();
+      return;
+    }
+
+    if (this.activeTool === 'circle' && this.toolState.start) {
+      const dx = point.x - this.toolState.start.x;
+      const dy = point.y - this.toolState.start.y;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      if (r > 10) {
+        Lighting.Model.addObject({
+          name: 'Círculo',
+          shape: 'circle',
+          x: this.toolState.start.x,
+          y: this.toolState.start.y,
+          radius: r,
+        });
+        Lighting.Model._save();
+      }
+      this.toolState = {};
+      this.setActiveTool('select');
+      Lighting.Render.draw();
+      return;
+    }
+
+    if (this.activeTool === 'select' && this.draggingId) {
+      this.draggingId = null;
+      this.dragOffset = null;
+      Lighting.Model._save();
+      return;
+    }
+  },
+
+  _onDoubleClick(e) {
+    if (!window.VTTMode || !VTTMode.is('lighting')) return;
+    const point = this._getPoint(e);
+
+    if (this.activeTool === 'polygon' && this.toolState.points && this.toolState.points.length >= 3) {
+      Lighting.Model.addObject({
+        name: 'Polígono',
+        shape: 'polygon',
+        x: 0,
+        y: 0,
+        points: this.toolState.points,
+      });
+      Lighting.Model._save();
+      this.toolState = {};
+      this.setActiveTool('select');
+      Lighting.Render.draw();
+      return;
+    }
+  },
+
+  _onContextMenu(e) {
+    if (!window.VTTMode || !VTTMode.is('lighting')) return;
+    e.preventDefault();
+    const point = this._getPoint(e);
+    const hit = this._hitTest(point);
+
+    if (hit) {
+      this.selectedObjectId = hit;
+      this.contextPos = { x: e.clientX, y: e.clientY };
+      Lighting.UI.showContextMenu(hit, this.contextPos);
+      Lighting.Render.draw();
+    }
+  },
+
+  _hitTest(point) {
+    // TODO: implementar hit test por shape (rect, circle, polygon)
+    const gs = Lighting.Model.gridSize || 50;
+    const hitRadius = gs;
+    for (let obj of Lighting.Model.objects) {
+      if (!obj.visible) continue;
+      if (obj.shape === 'circle') {
+        const dist = Math.hypot(obj.x - point.x, obj.y - point.y);
+        if (dist <= obj.radius + hitRadius) return obj.id;
+      } else if (obj.shape === 'rect') {
+        if (
+          point.x >= obj.x &&
+          point.x <= obj.x + obj.width &&
+          point.y >= obj.y &&
+          point.y <= obj.y + obj.height
+        ) {
+          return obj.id;
+        }
+      } else if (obj.shape === 'polygon' && obj.points && obj.points.length > 0) {
+        // ponto dentro polígono simples
+        if (this._pointInPolygon(point, obj.points)) return obj.id;
+      }
+    }
+    return null;
+  },
+
+  _pointInPolygon(point, polygon) {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].x,
+        yi = polygon[i].y;
+      const xj = polygon[j].x,
+        yj = polygon[j].y;
+      const intersect =
+        yi > point.y !== yj > point.y && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi;
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  },
+};
+
+Lighting.Input.init();
+</script>
