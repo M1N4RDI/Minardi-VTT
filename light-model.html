@@ -51,7 +51,7 @@ LightPlugin.Model = {
   // ---- ESCURIDÃO ----
 
   addDarkness(props) {
-    const obj = Object.assign({ id: this._id(), name: "Escuridão " + this._nextId, behavior: "eternal" }, props);
+    const obj = Object.assign({ id: this._id(), name: "Escuridão " + this._nextId, behavior: "eternal", _maskDirty: true }, props);
     this.darknessObjects.push(obj);
     this._save(); return obj;
   },
@@ -63,7 +63,13 @@ LightPlugin.Model = {
 
   updateDarkness(id, props) {
     const o = this.darknessObjects.find(o => o.id === id);
-    if (o) { Object.assign(o, props); this._save(); }
+    if (o) {
+      Object.assign(o, props);
+      if (props.type || props.x || props.y || props.w || props.h || props.r || props.behavior) {
+        o._maskDirty = true;
+      }
+      this._save();
+    }
   },
 
   // ---- LUZ ----
@@ -146,7 +152,10 @@ LightPlugin.Model = {
       if (!raw) return;
       const d = JSON.parse(raw);
       if (d.darknessObjects) this.darknessObjects = d.darknessObjects;
-      if (d.lightObjects)    this.lightObjects    = d.lightObjects;
+      if (d.lightObjects)    this.lightObjects    = d.lightObjects.map(o => {
+        if (o.lightType !== "source") o.lightType = "source";
+        return o;
+      });
       if (d.wallObjects)     this.wallObjects     = d.wallObjects;
       if (d.settings)        Object.assign(this.settings, d.settings);
       if (d._nextId)         this._nextId         = d._nextId;

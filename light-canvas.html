@@ -99,23 +99,23 @@ LightPlugin.Canvas = {
       ...tokenSources
     ];
 
-    // ---- 1. Desenha apenas as regiões de escuridão manual ----
-    if (hasDarkness) {
-      m.darknessObjects.forEach(o => this._fillShape(ctx, o, m.settings.fogOpacity));
-    }
+    const tempDarkness = m.darknessObjects.filter(o => o.behavior === "temporary");
+    const eternalDarkness = m.darknessObjects.filter(o => o.behavior !== "temporary");
 
-    // ---- 2. Se há luz e não há escuridão manual, escurece todo o mapa ----
+    tempDarkness.forEach(o => this._ensureTempDarknessMask(o, W, H));
+
+    // ---- 1. Se há luz e não há escuridão manual, escurece todo o mapa ----
     if (hasLightSource && !hasDarkness) {
       ctx.fillStyle = `rgba(0,0,0,${m.settings.fogOpacity})`;
       ctx.fillRect(0, 0, W, H);
     }
 
-    // ---- 3. Corta áreas iluminadas (Luz tipo "cut" = sem raycasting) ----
+    // ---- 2. Corta áreas iluminadas (Luz tipo "cut" = sem raycasting) ----
     m.lightObjects
       .filter(o => o.lightType === "cut")
       .forEach(o => this._cutShape(ctx, o));
 
-    // ---- 4. Fontes de luz com raycasting ----
+    // ---- 3. Fontes de luz com raycasting ----
     allSrcs.forEach(src => {
       const size       = window.VTTGrid?.size || 50;
       const lightPx    = (src.lightRadius || 6)  * size;
@@ -129,10 +129,21 @@ LightPlugin.Canvas = {
       // Luz plena — corte total
       const lightPoly = LightPlugin.Raycast.compute(origin, lightPx, walls, W, H);
       this._cutPoly(ctx, lightPoly);
+
+      tempDarkness.forEach(o => this._cutMaskPoly(o._maskCanvas, lightPoly));
     });
 
-    // ---- 5. Com escuridão manual e luz juntas, o corte de luz remove trechos da sombra ----
-    // (não reaplicamos escuridão manual depois, pois isso anulava a iluminação)
+    // ---- 4. Desenha as sombras temporárias com os cortes permanentes ----
+    tempDarkness.forEach(o => {
+      if (!o._maskCanvas) return;
+      ctx.save();
+      ctx.globalAlpha = m.settings.fogOpacity;
+      ctx.drawImage(o._maskCanvas, 0, 0);
+      ctx.restore();
+    });
+
+    // ---- 5. Desenha as sombras eternas por cima da iluminação ----
+    eternalDarkness.forEach(o => this._fillShape(ctx, o, m.settings.fogOpacity));
 
     // ---- 6. Overlay especial do mestre ----
     if (m.settings.masterReveal) {
@@ -142,9 +153,42 @@ LightPlugin.Canvas = {
       ctx.fillRect(0, 0, W, H);
       // Mostra paredes
       this._drawWallLines(ctx);
-    } else if (m.settings.showWalls) {
-      this._drawWallLines(ctx);
     }
+
+    this._drawSelectionMarker(ctx);
+  },
+
+  _drawSelectionMarker(ctx) {
+    const sel = LightPlugin.Control.selected;
+    if (!sel) return;
+
+    const obj = sel.cat === "darkness"
+      ? LightPlugin.Model.darknessObjects.find(o => o.id === sel.id)
+      : LightPlugin.Model.lightObjects.find(o => o.id === sel.id);
+    if (!obj) return;
+
+    let cx = obj.x;
+    let cy = obj.y;
+    if (obj.type === "rect") {
+      cx = obj.x + obj.w / 2;
+      cy = obj.y + obj.h / 2;
+    }
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,220,130,0.95)";
+    ctx.fillStyle = "rgba(255,220,130,0.18)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx - 8, cy);
+    ctx.lineTo(cx + 8, cy);
+    ctx.moveTo(cx, cy - 8);
+    ctx.lineTo(cx, cy + 8);
+    ctx.stroke();
+    ctx.restore();
   },
 
   // ---- Corta um shape do fog completamente (destination-out) ----
@@ -179,6 +223,36 @@ LightPlugin.Canvas = {
     ctx.save();
     ctx.globalCompositeOperation = "destination-out";
     ctx.fillStyle = `rgba(0,0,0,${1 - dimOpacity})`;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    pts.forEach(p => ctx.lineTo(p.x, p.y));
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  },
+
+  _ensureTempDarknessMask(o, W, H) {
+    if (!o._maskCanvas || o._maskCanvas.width !== W || o._maskCanvas.height !== H || o._maskDirty) {
+      const c = document.createElement("canvas");
+      c.width = W; c.height = H;
+      const ctx = c.getContext("2d");
+      ctx.clearRect(0, 0, W, H);
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,1)";
+      this._tracePath(ctx, o);
+      ctx.fill();
+      ctx.restore();
+      o._maskCanvas = c;
+      o._maskDirty = false;
+    }
+  },
+
+  _cutMaskPoly(maskCanvas, pts) {
+    if (!maskCanvas || !pts.length) return;
+    const ctx = maskCanvas.getContext("2d");
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.fillStyle = "rgba(0,0,0,1)";
     ctx.beginPath();
     ctx.moveTo(pts[0].x, pts[0].y);
     pts.forEach(p => ctx.lineTo(p.x, p.y));

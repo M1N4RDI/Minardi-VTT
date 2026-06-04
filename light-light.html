@@ -110,6 +110,8 @@ LightPlugin.Light = {
   _startSelect(pos) {
     const hit = this._hitTest(pos);
     this._selected = hit ? hit.id : null;
+    if (hit) LightPlugin.Control.selectObject("light", hit.id);
+    else LightPlugin.Control.clearSelection();
 
     if (hit) {
       this._dragging  = true;

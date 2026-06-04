@@ -24,6 +24,7 @@ LightPlugin.Control = {
     fn:  "select"
   },
 
+  selected: null,
   _rafPending: false,
   _tokenSig:   "",
 
@@ -40,6 +41,19 @@ LightPlugin.Control = {
   setState(partial) {
     Object.assign(this.state, partial);
     LightPlugin.UI.updateToolbar();
+  },
+
+  selectObject(cat, id) {
+    this.selected = { cat, id };
+    LightPlugin.UI.updateToolbar();
+    LightPlugin.UI.refreshLists();
+    this.requestRedraw();
+  },
+
+  clearSelection() {
+    this.selected = null;
+    LightPlugin.UI.updateToolbar();
+    this.requestRedraw();
   },
 
   // Ativa o modo iluminação no VTTMode global

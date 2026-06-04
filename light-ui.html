@@ -11,6 +11,7 @@ window.LightPlugin = window.LightPlugin || {};
 LightPlugin.UI = {
 
   _panel: null,
+  searchQuery: "",
 
   init() {
     console.log("LightPlugin.UI INIT");
@@ -190,6 +191,13 @@ LightPlugin.UI = {
             border-radius:7px;display:none;
           "></div>
 
+          <div style="margin-bottom:10px;">
+            <input id="lt-search-input" type="search" placeholder="Buscar por nome..."
+              value=""
+              style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#eee;"
+              oninput="LightPlugin.UI.setSearch(this.value)">
+          </div>
+
           <!-- Listas -->
           <div style="margin-bottom:8px;">
             <div style="font-size:0.65em;text-transform:uppercase;color:#444;letter-spacing:1px;margin-bottom:6px;">
@@ -294,6 +302,12 @@ LightPlugin.UI = {
       b.style.borderColor = active ? "rgba(241,196,15,0.35)" : "rgba(255,255,255,0.08)";
     });
 
+    // Atualiza campo de busca se preciso
+    const searchInput = document.getElementById("lt-search-input");
+    if (searchInput && searchInput.value !== this.searchQuery) {
+      searchInput.value = this.searchQuery;
+    }
+
     // Formatos (dependem da categoria)
     const fmtRow = document.getElementById("lt-fmt-row");
     if (fmtRow) {
@@ -356,13 +370,18 @@ LightPlugin.UI = {
     const el = document.getElementById(containerId);
     if (!el) return;
 
-    if (!items.length) {
-      el.innerHTML = `<div style="color:#333;font-size:0.75em;padding:4px 0;">Nenhum.</div>`;
+    const query = this.searchQuery.trim().toLowerCase();
+    const filtered = query
+      ? items.filter(o => (o.name || "").toLowerCase().includes(query))
+      : items;
+
+    if (!filtered.length) {
+      el.innerHTML = `<div style="color:#333;font-size:0.75em;padding:4px 0;">Nenhum resultado.</div>`;
       return;
     }
 
     el.innerHTML = "";
-    items.forEach(obj => {
+    filtered.forEach(obj => {
       const row = document.createElement("div");
       row.style.cssText = `
         display:flex;align-items:center;justify-content:space-between;
@@ -387,12 +406,15 @@ LightPlugin.UI = {
 
       row.onclick = () => {
         if (containerId === "lt-list-darkness") {
+          LightPlugin.Control.selectObject("darkness", obj.id);
           LightPlugin.Control.setState({ cat: "darkness" });
           LightPlugin.UI.showObjectProperties(obj);
         } else if (containerId === "lt-list-lights") {
+          LightPlugin.Control.selectObject("light", obj.id);
           LightPlugin.Control.setState({ cat: "light" });
           LightPlugin.UI.showObjectProperties(obj);
         } else if (containerId === "lt-list-walls") {
+          LightPlugin.Control.clearSelection();
           LightPlugin.Control.setState({ cat: "walls" });
           LightPlugin.UI.showObjectProperties(obj);
         }
@@ -420,45 +442,47 @@ LightPlugin.UI = {
       // Objeto de luz
       el.innerHTML = `
         <div style="font-size:0.7em;color:#f1c40f;font-weight:700;margin-bottom:8px;">💡 ${obj.name}</div>
-        <div style="display:flex;gap:6px;margin-bottom:8px;">
-          <button onclick="LightPlugin.Model.updateLight(${obj.id},{lightType:'cut'});LightPlugin.Control.requestRedraw();"
-            style="flex:1;padding:5px;font-size:0.7em;border-radius:5px;border:1px solid rgba(255,255,255,0.1);
-              background:${obj.lightType==="cut"?"rgba(241,196,15,0.2)":"rgba(255,255,255,0.04)"};
-              color:${obj.lightType==="cut"?"#f1c40f":"#777"};cursor:pointer;">
-            ✂ Cortar Escuridão
-          </button>
-          <button onclick="LightPlugin.Model.updateLight(${obj.id},{lightType:'source'});LightPlugin.Control.requestRedraw();"
-            style="flex:1;padding:5px;font-size:0.7em;border-radius:5px;border:1px solid rgba(255,255,255,0.1);
-              background:${obj.lightType==="source"?"rgba(241,196,15,0.2)":"rgba(255,255,255,0.04)"};
-              color:${obj.lightType==="source"?"#f1c40f":"#777"};cursor:pointer;">
-            ☀ Fonte de Luz
-          </button>
+        <div style="margin-bottom:10px;">
+          <label style="display:block;font-size:0.72em;color:#888;margin-bottom:4px;">Nome</label>
+          <input type="text" value=${JSON.stringify(obj.name)}
+            style="width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#eee;"
+            oninput="LightPlugin.UI.updateObjectName(${obj.id},'light',this.value)">
         </div>
-        ${obj.lightType === "source" ? `
-          <div style="margin-bottom:6px;">
-            <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
-              <label style="font-size:0.72em;color:#888;">Raio Luz (sq)</label>
-              <span id="lp-lr" style="font-size:0.72em;color:#f1c40f;">${obj.lightRadius}</span>
-            </div>
-            <input type="range" min="1" max="30" value="${obj.lightRadius}" style="accent-color:#f1c40f;"
-              oninput="document.getElementById('lp-lr').textContent=this.value;
-                LightPlugin.Control.updateLight(${obj.id},{lightRadius:+this.value})">
+        <div style="display:flex;gap:6px;margin-bottom:8px;">
+          <div style="flex:1;padding:5px;font-size:0.7em;border-radius:5px;border:1px solid rgba(255,255,255,0.1);
+              background:rgba(255,255,255,0.04);color:#777; text-align:center;">
+            ☀ Fonte de Luz
           </div>
-          <div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
-              <label style="font-size:0.72em;color:#888;">Raio Penumbra (sq)</label>
-              <span id="lp-dr" style="font-size:0.72em;color:#f1c40f;">${obj.dimRadius}</span>
-            </div>
-            <input type="range" min="1" max="40" value="${obj.dimRadius}" style="accent-color:#f1c40f;"
-              oninput="document.getElementById('lp-dr').textContent=this.value;
-                LightPlugin.Control.updateLight(${obj.id},{dimRadius:+this.value})">
+        </div>
+        <div style="margin-bottom:6px;">
+          <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+            <label style="font-size:0.72em;color:#888;">Raio Luz (sq)</label>
+            <span id="lp-lr" style="font-size:0.72em;color:#f1c40f;">${obj.lightRadius}</span>
           </div>
-        ` : ""}
+          <input type="range" min="1" max="30" value="${obj.lightRadius}" style="accent-color:#f1c40f;"
+            oninput="document.getElementById('lp-lr').textContent=this.value;
+              LightPlugin.Control.updateLight(${obj.id},{lightRadius:+this.value})">
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+            <label style="font-size:0.72em;color:#888;">Raio Penumbra (sq)</label>
+            <span id="lp-dr" style="font-size:0.72em;color:#f1c40f;">${obj.dimRadius}</span>
+          </div>
+          <input type="range" min="1" max="40" value="${obj.dimRadius}" style="accent-color:#f1c40f;"
+            oninput="document.getElementById('lp-dr').textContent=this.value;
+              LightPlugin.Control.updateLight(${obj.id},{dimRadius:+this.value})">
+        </div>
       `;
     } else if (obj.behavior !== undefined) {
       // Objeto de escuridão
       el.innerHTML = `
         <div style="font-size:0.7em;color:#aaa;font-weight:700;margin-bottom:8px;">🌑 ${obj.name}</div>
+        <div style="margin-bottom:10px;">
+          <label style="display:block;font-size:0.72em;color:#888;margin-bottom:4px;">Nome</label>
+          <input type="text" value=${JSON.stringify(obj.name)}
+            style="width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#eee;"
+            oninput="LightPlugin.UI.updateObjectName(${obj.id},'darkness',this.value)">
+        </div>
         <div style="display:flex;gap:6px;">
           <button onclick="LightPlugin.Model.updateDarkness(${obj.id},{behavior:'eternal'});LightPlugin.Control.requestRedraw();"
             style="flex:1;padding:5px;font-size:0.7em;border-radius:5px;border:1px solid rgba(255,255,255,0.1);
@@ -477,6 +501,24 @@ LightPlugin.UI = {
     } else {
       el.innerHTML = `<div style="font-size:0.75em;color:#888;">🧱 ${obj.name}</div>`;
     }
+  },
+
+  updateObjectName(id, cat, value) {
+    if (cat === "light") {
+      LightPlugin.Model.updateLight(id, { name: value });
+    } else if (cat === "darkness") {
+      LightPlugin.Model.updateDarkness(id, { name: value });
+    }
+    this.refreshLists();
+    this.showObjectProperties(cat === "light"
+      ? LightPlugin.Model.lightObjects.find(o => o.id === id)
+      : LightPlugin.Model.darknessObjects.find(o => o.id === id)
+    );
+  },
+
+  setSearch(value) {
+    this.searchQuery = value;
+    this.refreshLists();
   },
 
   // ============================================================
