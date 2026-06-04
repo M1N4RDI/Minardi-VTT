@@ -1,0 +1,50 @@
+<script>
+// lighting-ui.html — painel simples para gerenciar Lighting (admin)
+console.log('lighting-ui carregado');
+(function(){
+  function buildPanel(){
+    const sidebar = document.getElementById('sidebar');
+    if (!sidebar) return;
+    const cat = document.createElement('div'); cat.className='category';
+    const title = document.createElement('div'); title.className='category-title'; title.innerText='Lighting'; cat.appendChild(title);
+
+    const group = document.createElement('div'); group.className='control-group';
+
+    const createBtn = document.createElement('button'); createBtn.innerText='➕ Criar Luz (no centro da tela)';
+    createBtn.style.cssText='width:100%;padding:8px;margin-top:6px;';
+    createBtn.onclick = ()=>{
+      const canvas = document.getElementById('map-container');
+      const rect = canvas.getBoundingClientRect();
+      const gs = Lighting.Model.gridSize || 50;
+      const gx = Math.floor((rect.width/2) / gs);
+      const gy = Math.floor((rect.height/2) / gs);
+      Lighting.Control.createLightAtGrid(gx, gy);
+      renderList();
+    };
+
+    const list = document.createElement('div'); list.style.marginTop='8px';
+
+    function renderList(){
+      list.innerHTML='';
+      Lighting.Model.lights.forEach(l=>{
+        const el = document.createElement('div'); el.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:6px;border-bottom:1px solid #222;';
+        el.innerHTML = `<div style="font-size:13px;color:#eee;">${l.name} — (${Math.round(l.x)},${Math.round(l.y)})</div>`;
+        const controls = document.createElement('div');
+        const del = document.createElement('button'); del.innerText='❌'; del.style.cssText='margin-left:6px;'; del.onclick=()=>{ Lighting.Model.removeLight(l.id); Lighting.Model._save(); Lighting.Render.draw(); renderList(); };
+        controls.appendChild(del);
+        el.appendChild(controls);
+        list.appendChild(el);
+      });
+    }
+
+    group.appendChild(createBtn);
+    group.appendChild(list);
+    cat.appendChild(group);
+    sidebar.appendChild(cat);
+    renderList();
+  }
+
+  // delay para garantir sidebar
+  setTimeout(buildPanel, 300);
+})();
+</script>

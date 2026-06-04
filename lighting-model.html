@@ -53,6 +53,14 @@ Lighting.Model = {
       const payload = JSON.stringify({ walls: this.walls, lights: this.lights, fogs: this.fogs, explored: this.exploredMask });
       // storage backend: localStorage for now; callers can override to use GAS
       localStorage.setItem('lighting_state', payload);
+      // se disponível, persiste via GAS
+      try {
+        if (window.google && google.script && google.script.run && typeof google.script.run.saveLightingState === 'function') {
+          google.script.run.withFailureHandler(err=>console.warn('GAS save failed', err)).saveLightingState(payload);
+        }
+      } catch(e) {
+        // ignore — ambiente não GAS
+      }
     } catch (e) { console.warn('Lighting save failed', e); }
   },
 

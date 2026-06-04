@@ -121,6 +121,20 @@ TokenPlugin.Canvas = {
                         ctx.strokeStyle = "#f1c40f";
                         ctx.stroke();
                     }
+
+                    // Indicador: token possui luz vinculada?
+                    if (window.Lighting && Lighting.Model && Lighting.Model.lights.some(ll => ll.tokenId === t.id)) {
+                        ctx.beginPath();
+                        const ix = centerX + radius - 10;
+                        const iy = centerY - radius + 10;
+                        ctx.fillStyle = '#f1c40f';
+                        ctx.arc(ix, iy, 6, 0, Math.PI*2);
+                        ctx.fill();
+                        ctx.fillStyle = '#fff';
+                        ctx.font = '10px sans-serif';
+                        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                        ctx.fillText('💡', ix, iy - 1);
+                    }
                 }
 
             } else {

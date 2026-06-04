@@ -223,3 +223,23 @@ function testeCompleto() {
     Logger.log("ERRO: " + e.toString());
   }
 }
+
+/**
+ * Save lighting state (stringified JSON) to Script Properties for persistence
+ */
+function saveLightingState(jsonStr) {
+  try {
+    PropertiesService.getScriptProperties().setProperty('lighting_state', jsonStr);
+    return { ok: true };
+  } catch(e) { return { error: e.toString() }; }
+}
+
+/**
+ * Get lighting state (string) previously saved
+ */
+function getLightingState() {
+  try {
+    var v = PropertiesService.getScriptProperties().getProperty('lighting_state');
+    return v || null;
+  } catch(e) { return { error: e.toString() }; }
+}
