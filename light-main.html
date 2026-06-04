@@ -15,6 +15,7 @@ LightPlugin.boot = function() {
     LightPlugin.Raycast;        // sem init — funções puras
     LightPlugin.Fog.init();
     LightPlugin.Wall.init();
+    LightPlugin.Light.init();
     LightPlugin.Control.init();
     LightPlugin.UI.init();
 
@@ -85,6 +86,62 @@ document.addEventListener("DOMContentLoaded", function() {
 
       ctx.setLineDash([]);
       ctx.restore();
+    };
+
+    LightPlugin.Canvas.drawLightPreview = function(start, end, fmt) {
+      const c = this._wall; // reutiliza o canvas de preview
+      if (!c) return;
+      const ctx = c.getContext("2d");
+      ctx.clearRect(0, 0, c.width, c.height);
+
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,200,50,0.7)";
+      ctx.fillStyle   = "rgba(255,200,50,0.2)";
+      ctx.lineWidth   = 2;
+      ctx.setLineDash([5,4]);
+
+      if (fmt === "rect") {
+        const x = Math.min(start.x, end.x);
+        const y = Math.min(start.y, end.y);
+        const w = Math.abs(end.x - start.x);
+        const h = Math.abs(end.y - start.y);
+        ctx.beginPath();
+        ctx.rect(x, y, w, h);
+        ctx.fill(); ctx.stroke();
+      } else if (fmt === "circle") {
+        const r = Math.hypot(end.x - start.x, end.y - start.y);
+        ctx.beginPath();
+        ctx.arc(start.x, start.y, r, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+      }
+
+      ctx.setLineDash([]);
+      ctx.restore();
+    };
+
+    LightPlugin.Canvas.drawWallPreview = function(x1, y1, x2, y2) {
+      const c = this._wall;
+      if (!c) return;
+      const ctx = c.getContext("2d");
+      ctx.clearRect(0, 0, c.width, c.height);
+
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,100,100,0.8)";
+      ctx.lineWidth   = 2;
+      ctx.setLineDash([4,3]);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    };
+
+    LightPlugin.Canvas.clearWallPreview = function() {
+      const c = this._wall;
+      if (!c) return;
+      const ctx = c.getContext("2d");
+      ctx.clearRect(0, 0, c.width, c.height);
     };
   }, 100);
 })();

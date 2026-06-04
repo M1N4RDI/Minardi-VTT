@@ -77,7 +77,8 @@ LightPlugin.Wall = {
   },
 
   _isActive() {
-    return LightPlugin.Control.state.cat === "walls" &&
+    return VTTMode.is("lighting") &&
+           LightPlugin.Control.state.cat === "walls" &&
            LightPlugin.Model.settings.enabled;
   },
 

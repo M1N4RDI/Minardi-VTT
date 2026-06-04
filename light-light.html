@@ -1,17 +1,17 @@
 <script>
 // ============================================================
 // MINARDI VTT — LightPlugin
-// light-fog.html — Sistema de Escuridão (objetos manuais)
+// light-light.html — Sistema de Luzes (criação e seleção)
 //
 // Responsável por: criação, seleção, movimento e deleção
-// de objetos de escuridão (retângulo e círculo).
+// de objetos de luz (retângulo e círculo).
 // ============================================================
 
-console.log("light-fog carregado");
+console.log("light-light carregado");
 
 window.LightPlugin = window.LightPlugin || {};
 
-LightPlugin.Fog = {
+LightPlugin.Light = {
 
   // Objeto selecionado atualmente
   _selected:    null,
@@ -24,7 +24,7 @@ LightPlugin.Fog = {
   _drawStart:   null,
 
   init() {
-    console.log("LightPlugin.Fog INIT");
+    console.log("LightPlugin.Light INIT");
     this._bindEvents();
   },
 
@@ -64,7 +64,7 @@ LightPlugin.Fog = {
 
   _isActive() {
     return VTTMode.is("lighting") &&
-           LightPlugin.Control.state.cat === "darkness" &&
+           LightPlugin.Control.state.cat === "light" &&
            LightPlugin.Model.settings.enabled;
   },
 
@@ -77,7 +77,7 @@ LightPlugin.Fog = {
   },
 
   _updateDraw(pos) {
-    LightPlugin.Canvas.drawFogPreview(this._drawStart, pos,
+    LightPlugin.Canvas.drawLightPreview(this._drawStart, pos,
       LightPlugin.Control.state.fmt);
   },
 
@@ -93,11 +93,11 @@ LightPlugin.Fog = {
       const x = Math.min(s.x, pos.x), y = Math.min(s.y, pos.y);
       const w = Math.abs(pos.x - s.x), h = Math.abs(pos.y - s.y);
       if (w < 5 || h < 5) return;
-      obj = LightPlugin.Model.addDarkness({ type:"rect", x, y, w, h });
+      obj = LightPlugin.Model.addLight({ type:"rect", x, y, w, h });
     } else if (fmt === "circle") {
       const r = Math.hypot(pos.x - s.x, pos.y - s.y);
       if (r < 5) return;
-      obj = LightPlugin.Model.addDarkness({ type:"circle", x: s.x, y: s.y, r });
+      obj = LightPlugin.Model.addLight({ type:"circle", x: s.x, y: s.y, r });
     }
 
     this._selected = obj ? obj.id : null;
@@ -123,7 +123,7 @@ LightPlugin.Fog = {
   },
 
   _updateDrag(pos) {
-    const obj = LightPlugin.Model.darknessObjects.find(o => o.id === this._selected);
+    const obj = LightPlugin.Model.lightObjects.find(o => o.id === this._selected);
     if (!obj) return;
 
     if (obj.type === "circle") {
@@ -146,7 +146,7 @@ LightPlugin.Fog = {
   _eraseAt(pos) {
     const hit = this._hitTest(pos);
     if (hit) {
-      LightPlugin.Model.removeDarkness(hit.id);
+      LightPlugin.Model.removeLight(hit.id);
       this._selected = null;
       LightPlugin.Canvas.redraw();
       LightPlugin.UI.refreshLists();
@@ -156,7 +156,7 @@ LightPlugin.Fog = {
   // ---- HIT TEST ----
 
   _hitTest(pos) {
-    const objs = LightPlugin.Model.darknessObjects;
+    const objs = LightPlugin.Model.lightObjects;
     // Inverso: testa do topo (último adicionado)
     for (let i = objs.length - 1; i >= 0; i--) {
       const o = objs[i];

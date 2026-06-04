@@ -33,7 +33,7 @@ LightPlugin.Canvas = {
     if (!map) return;
 
     this._fog  = this._make("light-fog-canvas",  9,  false);
-    this._wall = this._make("light-wall-canvas", 11, true);
+    this._wall = this._make("light-wall-canvas", 11, false);
 
     if (!document.getElementById("light-fog-canvas"))  map.appendChild(this._fog);
     if (!document.getElementById("light-wall-canvas")) map.appendChild(this._wall);
@@ -86,19 +86,24 @@ LightPlugin.Canvas = {
     ctx.clearRect(0, 0, W, H);
     if (!m.settings.enabled) return;
 
+    const tokenSources = m.getTokenLightSources();
+    const hasDarkness = m.darknessObjects.length > 0;
+    const hasLightSource = m.lightObjects.filter(o => o.lightType === "source").length > 0 || tokenSources.length > 0;
+    
+    // Se não há nada (nem escuridão manual, nem fontes de luz), mapa fica totalmente visível
+    if (!hasDarkness && !hasLightSource) return;
+
     // ---- 1. Preenche tudo com escuridão ----
+    // (mas só se há objetos de escuridão manual OU há fontes de luz ativas)
     ctx.fillStyle = `rgba(0,0,0,${m.settings.fogOpacity})`;
     ctx.fillRect(0, 0, W, H);
 
-    // ---- 2. Corta objetos de escuridão manual ----
-    // (escuridão manual REFORÇA o fog, não corta — já está coberto acima)
-
-    // ---- 3. Corta áreas iluminadas (Luz tipo "cut" = sem raycasting) ----
+    // ---- 2. Corta áreas iluminadas (Luz tipo "cut" = sem raycasting) ----
     m.lightObjects
       .filter(o => o.lightType === "cut")
       .forEach(o => this._cutShape(ctx, o));
 
-    // ---- 4. Fontes de luz com raycasting ----
+    // ---- 3. Fontes de luz com raycasting ----
     const walls   = m.wallObjects;
     const allSrcs = [
       ...m.lightObjects.filter(o => o.lightType === "source" && !o.tokenId),
@@ -120,7 +125,7 @@ LightPlugin.Canvas = {
       this._cutPoly(ctx, lightPoly);
     });
 
-    // ---- 5. Reaplica escuridão manual por cima ----
+    // ---- 4. Reaplica escuridão manual por cima ----
     // Objetos de escuridão manual têm prioridade sobre fontes de luz
     m.darknessObjects.forEach(o => this._fillShape(ctx, o, m.settings.fogOpacity));
 
