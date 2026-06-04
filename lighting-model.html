@@ -1,0 +1,74 @@
+<script>
+// lighting-model.html
+// Modelo simples e persistência do módulo Lighting
+console.log("lighting-model carregado");
+
+window.Lighting = window.Lighting || {};
+Lighting.Model = {
+  gridSize: 50, // padrão (em px) — sempre usar unidades de grid para raios
+
+  walls: [],     // [{id, p1:{x,y}, p2:{x,y}}]
+  lights: [],    // [{id, name, x, y, rLight, rPenumbra, type:'fixed'|'token', tokenId:null}]
+  fogs: [],      // [{id, type:'poly'|'rect', points:[], behavior:'permanent'|'explored'}]
+
+  exploredMask: [], // lista de polygons acumulados quando modo explorado
+
+  _nextId: 1,
+
+  // CRUD
+  addWall(p1, p2) {
+    const id = this._nextId++;
+    const w = { id, p1, p2 };
+    this.walls.push(w);
+    return w;
+  },
+
+  removeWall(id) { this.walls = this.walls.filter(w => w.id !== id); },
+
+  addLight(props) {
+    const id = this._nextId++;
+    const l = Object.assign({ id, name: 'Luz', x:0,y:0, rLight:6, rPenumbra:12, type:'fixed', tokenId:null }, props);
+    this.lights.push(l);
+    return l;
+  },
+
+  updateLight(id, props) {
+    const idx = this.lights.findIndex(l => l.id === id);
+    if (idx === -1) return null;
+    this.lights[idx] = Object.assign({}, this.lights[idx], props);
+    return this.lights[idx];
+  },
+
+  removeLight(id) { this.lights = this.lights.filter(l => l.id !== id); },
+
+  addFog(f) { f.id = this._nextId++; this.fogs.push(f); return f; },
+  removeFog(id) { this.fogs = this.fogs.filter(f => f.id !== id); },
+
+  // Explored mask accumulation — recebe polygon (array of pts) em px
+  accumulateExplored(poly) { this.exploredMask.push(poly); },
+
+  // Persistence (GAS friendly: serialize to JSON)
+  _save() {
+    try {
+      const payload = JSON.stringify({ walls: this.walls, lights: this.lights, fogs: this.fogs, explored: this.exploredMask });
+      // storage backend: localStorage for now; callers can override to use GAS
+      localStorage.setItem('lighting_state', payload);
+    } catch (e) { console.warn('Lighting save failed', e); }
+  },
+
+  _load() {
+    try {
+      const raw = localStorage.getItem('lighting_state');
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      this.walls = s.walls || [];
+      this.lights = s.lights || [];
+      this.fogs = s.fogs || [];
+      this.exploredMask = s.explored || [];
+    } catch (e) { console.warn('Lighting load failed', e); }
+  }
+};
+
+// Carrega instantaneamente se disponível
+Lighting.Model._load();
+</script>

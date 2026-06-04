@@ -41,6 +41,7 @@ console.log("token-ui carregado");
                 <div class="menu-item" data-action="edit-entropy">💀 Entropia</div>
                 <div class="menu-item" data-action="edit-initiative">⚔️ Iniciativa</div>
                 <div class="menu-item" data-action="edit-armor">🛡️ Armadura</div>
+                <div class="menu-item" data-action="toggle-light">💡 Alternar Luz</div>
                 <div class="menu-item" data-action="receive-damage">🩸 Receber Dano</div>
                 <div class="menu-item" data-action="attack">🗡️ Atacar</div>
                 <div class="menu-item" data-action="notes">📝 Notas</div>
@@ -216,6 +217,24 @@ console.log("token-ui carregado");
                         cleanup(); TokenPlugin.Canvas.draw(); TokenPlugin.Tracker.updateUI();
                     };
                     editor.querySelector("#initiative-cancel").onclick = cleanup;
+                    this.hide(); return;
+                }
+
+                // ---- TOGGLE LIGHT ----
+                if (action === "toggle-light") {
+                    if (window.Lighting && Lighting.Control && Lighting.Model) {
+                        const changed = Lighting.Control.toggleTokenLight(tokenId);
+                        if (changed) {
+                            // create visual feedback
+                            TokenPlugin.Canvas.draw();
+                            alert('Luz vinculada ao token.');
+                        } else {
+                            TokenPlugin.Canvas.draw();
+                            alert('Luz do token removida.');
+                        }
+                    } else {
+                        alert('Módulo Lighting não carregado.');
+                    }
                     this.hide(); return;
                 }
 

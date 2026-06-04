@@ -1,0 +1,63 @@
+<script>
+// lighting-control.html
+// API pública para gerenciar lights/walls/fogs — sem captura global de input
+console.log('lighting-control carregado');
+
+window.Lighting = window.Lighting || {};
+Lighting.Control = {
+  selected: null,
+
+  createLightAtGrid(xGrid, yGrid, rLight=6, rPen=12, opts={}){
+    const gs = Lighting.Model.gridSize || 50;
+    const x = xGrid * gs + gs/2;
+    const y = yGrid * gs + gs/2;
+    const l = Lighting.Model.addLight(Object.assign({ x, y, rLight, rPenumbra: rPen }, opts));
+    Lighting.Model._save();
+    Lighting.Render.buildSpatialIndex();
+    Lighting.Render.draw();
+    return l;
+  },
+
+  createWallGrid(p1Grid, p2Grid){
+    const gs = Lighting.Model.gridSize || 50;
+    const p1 = { x: p1Grid.x*gs + gs/2, y: p1Grid.y*gs + gs/2 };
+    const p2 = { x: p2Grid.x*gs + gs/2, y: p2Grid.y*gs + gs/2 };
+    const w = Lighting.Model.addWall(p1,p2);
+    Lighting.Model._save(); Lighting.Render.buildSpatialIndex(); Lighting.Render.draw();
+    return w;
+  },
+
+  toggleTokenLight(tokenId){
+    // If a light already linked to token, remove it. Else create attached light at token pos
+    const existing = Lighting.Model.lights.find(l => l.tokenId === tokenId);
+    if (existing) { Lighting.Model.removeLight(existing.id); Lighting.Model._save(); Lighting.Render.draw(); return null; }
+
+    if (!window.TokenPlugin || !TokenPlugin.Model) return null;
+    const t = TokenPlugin.Model.all().find(tt => tt.id === tokenId);
+    if (!t) return null;
+    const gs = Lighting.Model.gridSize || 50;
+    const x = t.gx*gs + (t.cells*gs)/2; const y = t.gy*gs + (t.cells*gs)/2;
+    const l = Lighting.Model.addLight({ x, y, rLight: t.light?.radius || 6, rPenumbra: t.light?.dimRadius || 12, type:'token', tokenId: tokenId });
+    Lighting.Model._save(); Lighting.Render.buildSpatialIndex(); Lighting.Render.draw();
+    return l;
+  },
+
+  attachTokenMovementPolling(intervalMs = 100) {
+    if (this._poller) return;
+    this._poller = setInterval(()=>{
+      const tokens = window.TokenPlugin?.Model?.all ? TokenPlugin.Model.all() : [];
+      tokens.forEach(t => {
+        const l = Lighting.Model.lights.find(ll => ll.tokenId === t.id);
+        if (l) {
+          const gs = Lighting.Model.gridSize || 50;
+          const nx = t.gx*gs + (t.cells*gs)/2, ny = t.gy*gs + (t.cells*gs)/2;
+          if (l.x !== nx || l.y !== ny) { l.x = nx; l.y = ny; Lighting.Render.draw(); }
+        }
+      });
+    }, intervalMs);
+  }
+};
+
+// Start token poller automatically to support token-linked lights
+setTimeout(()=>{ Lighting.Control.attachTokenMovementPolling(120); }, 400);
+</script>
