@@ -95,9 +95,19 @@ LightPlugin.Light = {
       if (w < 5 || h < 5) return;
       obj = LightPlugin.Model.addLight({ type:"rect", x, y, w, h });
     } else if (fmt === "circle") {
+      const size = window.VTTGrid?.size || 50;
       const r = Math.hypot(pos.x - s.x, pos.y - s.y);
       if (r < 5) return;
-      obj = LightPlugin.Model.addLight({ type:"circle", x: s.x, y: s.y, r });
+      const dimDiameterSq = Math.ceil((2 * r) / size);
+      const lightDiameterSq = Math.max(1, Math.ceil(dimDiameterSq / 3));
+      obj = LightPlugin.Model.addLight({
+        type: "circle",
+        x: s.x,
+        y: s.y,
+        r,
+        dimRadius: dimDiameterSq,
+        lightRadius: lightDiameterSq
+      });
     }
 
     this._selected = obj ? obj.id : null;
@@ -113,10 +123,10 @@ LightPlugin.Light = {
     if (hit) LightPlugin.Control.selectObject("light", hit.id);
     else LightPlugin.Control.clearSelection();
 
-    if (hit) {
+    if (hit && !hit.fixed) {
       this._dragging  = true;
-      this._dragOffX  = pos.x - (hit.type === "circle" ? hit.x : hit.x);
-      this._dragOffY  = pos.y - (hit.type === "circle" ? hit.y : hit.y);
+      this._dragOffX  = pos.x - hit.x;
+      this._dragOffY  = pos.y - hit.y;
     }
 
     LightPlugin.Canvas.redraw();
@@ -126,15 +136,10 @@ LightPlugin.Light = {
 
   _updateDrag(pos) {
     const obj = LightPlugin.Model.lightObjects.find(o => o.id === this._selected);
-    if (!obj) return;
+    if (!obj || obj.fixed) return;
 
-    if (obj.type === "circle") {
-      obj.x = pos.x - this._dragOffX;
-      obj.y = pos.y - this._dragOffY;
-    } else {
-      obj.x = pos.x - this._dragOffX;
-      obj.y = pos.y - this._dragOffY;
-    }
+    obj.x = pos.x - this._dragOffX;
+    obj.y = pos.y - this._dragOffY;
     LightPlugin.Canvas.redraw();
   },
 

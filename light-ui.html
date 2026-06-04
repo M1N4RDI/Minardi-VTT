@@ -197,19 +197,39 @@ LightPlugin.UI = {
               style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#eee;"
               oninput="LightPlugin.UI.setSearch(this.value)">
           </div>
+          <div style="display:flex;gap:8px;margin-bottom:12px;">
+            <button onclick="LightPlugin.Control.fillWithDarkness()"
+              style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(231,76,60,0.12);color:#f39c12;cursor:pointer;">
+              Preencher com sombra
+            </button>
+            <button onclick="LightPlugin.Control.fillWithLight()"
+              style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(46,204,113,0.12);color:#2ecc71;cursor:pointer;">
+              Preencher com luz
+            </button>
+          </div>
 
           <!-- Listas -->
           <div style="margin-bottom:8px;">
-            <div style="font-size:0.65em;text-transform:uppercase;color:#444;letter-spacing:1px;margin-bottom:6px;">
-              🌑 Escuridão
-            </div>
-            <div id="lt-list-darkness" style="display:flex;flex-direction:column;gap:3px;"></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <div style="font-size:0.65em;text-transform:uppercase;color:#444;letter-spacing:1px;">🌑 Escuridão</div>
+            <button onclick="LightPlugin.Control.clearAllDarkness()"
+              style="font-size:0.65em;padding:3px 8px;background:rgba(231,76,60,0.1);color:#e74c3c;
+                border:1px solid rgba(231,76,60,0.2);border-radius:4px;cursor:pointer;">
+              Limpar tudo
+            </button>
+          </div>
+          <div id="lt-list-darkness" style="display:flex;flex-direction:column;gap:3px;"></div>
           </div>
           <div style="margin-bottom:8px;">
-            <div style="font-size:0.65em;text-transform:uppercase;color:#444;letter-spacing:1px;margin-bottom:6px;">
-              💡 Luzes
-            </div>
-            <div id="lt-list-lights" style="display:flex;flex-direction:column;gap:3px;"></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <div style="font-size:0.65em;text-transform:uppercase;color:#444;letter-spacing:1px;">💡 Luzes</div>
+            <button onclick="LightPlugin.Control.clearAllLights()"
+              style="font-size:0.65em;padding:3px 8px;background:rgba(231,76,60,0.1);color:#e74c3c;
+                border:1px solid rgba(231,76,60,0.2);border-radius:4px;cursor:pointer;">
+              Limpar tudo
+            </button>
+          </div>
+          <div id="lt-list-lights" style="display:flex;flex-direction:column;gap:3px;"></div>
           </div>
           <div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -446,7 +466,8 @@ LightPlugin.UI = {
           <label style="display:block;font-size:0.72em;color:#888;margin-bottom:4px;">Nome</label>
           <input type="text" value=${JSON.stringify(obj.name)}
             style="width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#eee;"
-            oninput="LightPlugin.UI.updateObjectName(${obj.id},'light',this.value)">
+            oninput="LightPlugin.UI.updateObjectName(${obj.id},'light',this.value)"
+            onblur="LightPlugin.UI.refreshLists()">
         </div>
         <div style="display:flex;gap:6px;margin-bottom:8px;">
           <div style="flex:1;padding:5px;font-size:0.7em;border-radius:5px;border:1px solid rgba(255,255,255,0.1);
@@ -509,11 +530,6 @@ LightPlugin.UI = {
     } else if (cat === "darkness") {
       LightPlugin.Model.updateDarkness(id, { name: value });
     }
-    this.refreshLists();
-    this.showObjectProperties(cat === "light"
-      ? LightPlugin.Model.lightObjects.find(o => o.id === id)
-      : LightPlugin.Model.darknessObjects.find(o => o.id === id)
-    );
   },
 
   setSearch(value) {

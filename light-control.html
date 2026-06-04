@@ -140,6 +140,48 @@ LightPlugin.Control = {
   // PAREDES — ações do modelo
   // ============================================================
 
+  clearAllDarkness() {
+    LightPlugin.Model.darknessObjects = [];
+    LightPlugin.Model._save();
+    this.requestRedraw();
+    LightPlugin.UI.refreshLists();
+  },
+
+  clearAllLights() {
+    LightPlugin.Model.lightObjects = [];
+    LightPlugin.Model._save();
+    this.requestRedraw();
+    LightPlugin.UI.refreshLists();
+  },
+
+  fillWithDarkness() {
+    const map = document.getElementById("map-container");
+    if (!map) return;
+    const w = map.clientWidth || map.offsetWidth;
+    const h = map.clientHeight || map.offsetHeight;
+    if (!w || !h) return;
+    LightPlugin.Model.addDarkness({
+      type: "rect",
+      x: 0,
+      y: 0,
+      w,
+      h,
+      name: "Sombra total",
+      behavior: "eternal",
+      fixed: true
+    });
+    LightPlugin.Model._save();
+    this.requestRedraw();
+    LightPlugin.UI.refreshLists();
+  },
+
+  fillWithLight() {
+    LightPlugin.Model.darknessObjects = [];
+    LightPlugin.Model._save();
+    this.requestRedraw();
+    LightPlugin.UI.refreshLists();
+  },
+
   clearAllWalls() {
     LightPlugin.Model.wallObjects = [];
     LightPlugin.Model._save();
