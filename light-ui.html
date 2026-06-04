@@ -477,19 +477,19 @@ LightPlugin.UI = {
         </div>
         <div style="margin-bottom:6px;">
           <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
-            <label style="font-size:0.72em;color:#888;">Raio Luz (sq)</label>
+            <label style="font-size:0.72em;color:#888;">Diâmetro Luz (sq)</label>
             <span id="lp-lr" style="font-size:0.72em;color:#f1c40f;">${obj.lightRadius}</span>
           </div>
-          <input type="range" min="1" max="30" value="${obj.lightRadius}" style="accent-color:#f1c40f;"
+          <input type="range" min="1" max="60" value="${obj.lightRadius}" style="accent-color:#f1c40f;"
             oninput="document.getElementById('lp-lr').textContent=this.value;
               LightPlugin.Control.updateLight(${obj.id},{lightRadius:+this.value})">
         </div>
         <div>
           <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
-            <label style="font-size:0.72em;color:#888;">Raio Penumbra (sq)</label>
+            <label style="font-size:0.72em;color:#888;">Diâmetro Penumbra (sq)</label>
             <span id="lp-dr" style="font-size:0.72em;color:#f1c40f;">${obj.dimRadius}</span>
           </div>
-          <input type="range" min="1" max="40" value="${obj.dimRadius}" style="accent-color:#f1c40f;"
+          <input type="range" min="1" max="60" value="${obj.dimRadius}" style="accent-color:#f1c40f;"
             oninput="document.getElementById('lp-dr').textContent=this.value;
               LightPlugin.Control.updateLight(${obj.id},{dimRadius:+this.value})">
         </div>
@@ -502,7 +502,8 @@ LightPlugin.UI = {
           <label style="display:block;font-size:0.72em;color:#888;margin-bottom:4px;">Nome</label>
           <input type="text" value=${JSON.stringify(obj.name)}
             style="width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#eee;"
-            oninput="LightPlugin.UI.updateObjectName(${obj.id},'darkness',this.value)">
+            oninput="LightPlugin.UI.updateObjectName(${obj.id},'darkness',this.value)"
+            onblur="LightPlugin.UI.refreshLists()">
         </div>
         <div style="display:flex;gap:6px;">
           <button onclick="LightPlugin.Model.updateDarkness(${obj.id},{behavior:'eternal'});LightPlugin.Control.requestRedraw();"

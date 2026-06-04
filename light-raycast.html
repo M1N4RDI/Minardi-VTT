@@ -26,13 +26,62 @@ LightPlugin.Raycast = {
   // ============================================================
 
   compute(origin, radius, walls, canvasW, canvasH) {
-    if (!walls.length) {
-      return this._circlePoly(origin, radius, 64);
+    // Fast path: no walls -> simple circle poly
+    if (!walls || walls.length === 0) return this._circlePoly(origin, radius, 64);
+
+    // Build a flat list of segments (x1,y1,x2,y2)
+    const segs = this._buildSegments(walls);
+
+    // Collect unique vertex points from segments
+    const verts = this._collectVertices(segs);
+
+    // For each vertex compute angle and include tiny offsets to avoid missing edges
+    const angs = [];
+    for (let i = 0; i < verts.length; i++) {
+      const v = verts[i];
+      const a = Math.atan2(v.y - origin.y, v.x - origin.x);
+      angs.push(a - 0.0001, a, a + 0.0001);
     }
-    const segments = this._buildSegments(walls);
-    const angles   = this._collectAngles(origin, segments);
-    const rays     = this._castRays(origin, angles, segments, radius);
-    return rays;
+
+    // Deduplicate and sort angles
+    angs.sort((a, b) => a - b);
+    const uniq = [];
+    for (let i = 0; i < angs.length; i++) {
+      if (i === 0 || Math.abs(angs[i] - angs[i - 1]) > 1e-7) uniq.push(angs[i]);
+    }
+
+    // Cast rays for each angle and collect nearest hit (clamped to radius)
+    const hits = [];
+    const ox = origin.x, oy = origin.y;
+    for (let i = 0; i < uniq.length; i++) {
+      const angle = uniq[i];
+      const dx = Math.cos(angle), dy = Math.sin(angle);
+
+      let nearestT = radius;
+      let hitX = ox + dx * radius, hitY = oy + dy * radius;
+
+      for (let s = 0; s < segs.length; s++) {
+        const seg = segs[s];
+        const t = this._raySegIntersect(ox, oy, dx, dy, seg.x1, seg.y1, seg.x2, seg.y2);
+        if (t !== null && t >= 0 && t < nearestT) {
+          nearestT = t;
+          hitX = ox + dx * t;
+          hitY = oy + dy * t;
+        }
+      }
+
+      // clamp to canvas bounds (optional) — ensure points remain finite
+      if (!isFinite(hitX) || !isFinite(hitY)) {
+        hitX = ox + dx * radius;
+        hitY = oy + dy * radius;
+      }
+
+      hits.push({ x: hitX, y: hitY, angle });
+    }
+
+    // Sort by angle and return
+    hits.sort((a, b) => a.angle - b.angle);
+    return hits;
   },
 
   _circlePoly(origin, radius, resolution = 64) {
@@ -52,15 +101,34 @@ LightPlugin.Raycast = {
   _buildSegments(walls) {
     const segs = [];
 
-    // Paredes do modelo
-    walls.forEach(w => {
-      const pts = w.points;
-      for (let i = 0; i < pts.length - 1; i++) {
-        segs.push({ x1: pts[i].x, y1: pts[i].y, x2: pts[i+1].x, y2: pts[i+1].y });
+    // Support multiple wall shapes: either {points:[...]} or simple [{p1:{x,y},p2:{x,y}}]
+    for (let w = 0; w < walls.length; w++) {
+      const wall = walls[w];
+      if (wall.points && wall.points.length >= 2) {
+        const pts = wall.points;
+        for (let i = 0; i < pts.length - 1; i++) {
+          segs.push({ x1: pts[i].x, y1: pts[i].y, x2: pts[i+1].x, y2: pts[i+1].y });
+        }
+      } else if (wall.p1 && wall.p2) {
+        segs.push({ x1: wall.p1.x, y1: wall.p1.y, x2: wall.p2.x, y2: wall.p2.y });
       }
-    });
+    }
 
     return segs;
+  },
+
+  // Collect unique vertices from segments
+  _collectVertices(segs) {
+    const verts = [];
+    const seen = new Map();
+    for (let i = 0; i < segs.length; i++) {
+      const s = segs[i];
+      const k1 = `${s.x1},${s.y1}`;
+      if (!seen.has(k1)) { seen.set(k1, true); verts.push({ x: s.x1, y: s.y1 }); }
+      const k2 = `${s.x2},${s.y2}`;
+      if (!seen.has(k2)) { seen.set(k2, true); verts.push({ x: s.x2, y: s.y2 }); }
+    }
+    return verts;
   },
 
   // ---- Coleta ângulos para todos os vértices dos segmentos ----

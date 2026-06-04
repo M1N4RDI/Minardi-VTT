@@ -90,8 +90,8 @@ LightPlugin.Canvas = {
     const hasDarkness = m.darknessObjects.length > 0;
     const hasLightSource = m.lightObjects.filter(o => o.lightType === "source").length > 0 || tokenSources.length > 0;
 
-    // Se não há nada (nem escuridão manual, nem fontes de luz), mapa fica totalmente visível
-    if (!hasDarkness && !hasLightSource) return;
+    // Sem escuridão explícita, nenhuma sombra é renderizada.
+    if (!hasDarkness) return;
 
     const walls   = m.wallObjects;
     const allSrcs = [
@@ -104,36 +104,29 @@ LightPlugin.Canvas = {
 
     tempDarkness.forEach(o => this._ensureTempDarknessMask(o, W, H));
 
-    // ---- 1. Se há luz e não há escuridão manual, escurece todo o mapa ----
-    if (hasLightSource && !hasDarkness) {
-      ctx.fillStyle = `rgba(0,0,0,${m.settings.fogOpacity})`;
-      ctx.fillRect(0, 0, W, H);
-    }
+    // ---- 1. Desenha escuridão eterna primeiro ----
+    eternalDarkness.forEach(o => this._fillShape(ctx, o, m.settings.fogOpacity));
 
-    // ---- 2. Corta áreas iluminadas (Luz tipo "cut" = sem raycasting) ----
-    m.lightObjects
-      .filter(o => o.lightType === "cut")
-      .forEach(o => this._cutShape(ctx, o));
-
-    // ---- 3. Fontes de luz com raycasting ----
+    // ---- 2. Corta a escuridão eterna com fontes de luz ----
     allSrcs.forEach(src => {
       const size       = window.VTTGrid?.size || 50;
-      const lightPx    = (src.lightRadius || 6)  * size;
-      const dimPx      = (src.dimRadius   || 12) * size;
+      const lightPx    = ((src.lightRadius || 6) / 2) * size;
+      const dimPx      = ((src.dimRadius   || 12) / 2) * size;
       const origin     = { x: src.x, y: src.y };
 
-      // Penumbra (dim) — corte parcial
       const dimPoly = LightPlugin.Raycast.compute(origin, dimPx, walls, W, H);
       this._cutPolyAlpha(ctx, dimPoly, m.settings.dimOpacity);
 
-      // Luz plena — corte total
       const lightPoly = LightPlugin.Raycast.compute(origin, lightPx, walls, W, H);
       this._cutPoly(ctx, lightPoly);
 
-      tempDarkness.forEach(o => this._cutMaskPoly(o._maskCanvas, lightPoly));
+      tempDarkness.forEach(o => {
+        this._cutMaskPoly(o._maskCanvas, lightPoly);
+        this._cutMaskPolyAlpha(o._maskCanvas, dimPoly, m.settings.dimOpacity);
+      });
     });
 
-    // ---- 4. Desenha as sombras temporárias com os cortes permanentes ----
+    // ---- 3. Desenha as sombras temporárias com os cortes permanentes ----
     tempDarkness.forEach(o => {
       if (!o._maskCanvas) return;
       ctx.save();
@@ -142,16 +135,7 @@ LightPlugin.Canvas = {
       ctx.restore();
     });
 
-    // ---- 5. Desenha as sombras eternas por cima da iluminação ----
-    eternalDarkness.forEach(o => this._fillShape(ctx, o, m.settings.fogOpacity));
-
-    // ---- 6. Overlay especial do mestre ----
-    if (m.settings.masterReveal) {
-      ctx.clearRect(0, 0, W, H);
-      // Redesenha fog translúcido para mestre enxergar limites
-      ctx.fillStyle = "rgba(0,0,0,0.18)";
-      ctx.fillRect(0, 0, W, H);
-      // Mostra paredes
+    if (m.settings.showWalls) {
       this._drawWallLines(ctx);
     }
 
@@ -261,7 +245,19 @@ LightPlugin.Canvas = {
     ctx.restore();
   },
 
-  // ---- Preenche shape (escuridão manual por cima) ----
+  _cutMaskPolyAlpha(maskCanvas, pts, dimOpacity) {
+    if (!maskCanvas || !pts.length) return;
+    const ctx = maskCanvas.getContext("2d");
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.fillStyle = `rgba(0,0,0,${1 - dimOpacity})`;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    pts.forEach(p => ctx.lineTo(p.x, p.y));
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  },
   _fillShape(ctx, o, opacity) {
     ctx.save();
     ctx.globalCompositeOperation = "source-over";
