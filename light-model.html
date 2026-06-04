@@ -118,8 +118,8 @@ LightPlugin.Model = {
       .map(t => ({
         id:          "token_" + t.id,
         name:        (t.appearance?.name || "Token") + " (luz)",
-        lightRadius: (t.light.radius    || 6)  * size,
-        dimRadius:   (t.light.dimRadius || 12) * size,
+        lightRadius: (t.light.radius    || 6),
+        dimRadius:   (t.light.dimRadius || 12),
         x: t.gx * size + (t.cells * size) / 2,
         y: t.gy * size + (t.cells * size) / 2,
         tokenId: t.id

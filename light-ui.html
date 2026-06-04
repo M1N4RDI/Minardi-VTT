@@ -336,7 +336,7 @@ LightPlugin.UI = {
       "lt-list-darkness",
       LightPlugin.Model.darknessObjects,
       o => `🌑 ${o.name} <span style='opacity:.4;font-size:.7em'>${o.type}</span>`,
-      id => LightPlugin.Model.removeDarkness(id)
+      id => { LightPlugin.Model.removeDarkness(id); LightPlugin.Control.requestRedraw(); LightPlugin.UI.refreshLists(); }
     );
     this._renderList(
       "lt-list-lights",
@@ -369,7 +369,7 @@ LightPlugin.UI = {
         padding:5px 8px;border-radius:5px;
         background:rgba(255,255,255,0.02);
         border:1px solid rgba(255,255,255,0.05);
-        font-size:0.78em;
+        font-size:0.78em;cursor:pointer;
       `;
       const nameEl = document.createElement("div");
       nameEl.style.cssText = "flex:1;color:#bbb;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;";
@@ -383,7 +383,21 @@ LightPlugin.UI = {
       `;
       delBtn.onmouseenter = () => delBtn.style.color = "#e74c3c";
       delBtn.onmouseleave = () => delBtn.style.color = "#555";
-      delBtn.onclick = () => onDelete(obj.id);
+      delBtn.onclick = e => { e.stopPropagation(); onDelete(obj.id); };
+
+      row.onclick = () => {
+        if (containerId === "lt-list-darkness") {
+          LightPlugin.Control.setState({ cat: "darkness" });
+          LightPlugin.UI.showObjectProperties(obj);
+        } else if (containerId === "lt-list-lights") {
+          LightPlugin.Control.setState({ cat: "light" });
+          LightPlugin.UI.showObjectProperties(obj);
+        } else if (containerId === "lt-list-walls") {
+          LightPlugin.Control.setState({ cat: "walls" });
+          LightPlugin.UI.showObjectProperties(obj);
+        }
+        LightPlugin.UI.updateToolbar();
+      };
 
       row.appendChild(nameEl);
       row.appendChild(delBtn);

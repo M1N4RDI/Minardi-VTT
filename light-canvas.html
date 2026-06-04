@@ -89,27 +89,33 @@ LightPlugin.Canvas = {
     const tokenSources = m.getTokenLightSources();
     const hasDarkness = m.darknessObjects.length > 0;
     const hasLightSource = m.lightObjects.filter(o => o.lightType === "source").length > 0 || tokenSources.length > 0;
-    
+
     // Se não há nada (nem escuridão manual, nem fontes de luz), mapa fica totalmente visível
     if (!hasDarkness && !hasLightSource) return;
 
-    // ---- 1. Preenche tudo com escuridão ----
-    // (mas só se há objetos de escuridão manual OU há fontes de luz ativas)
-    ctx.fillStyle = `rgba(0,0,0,${m.settings.fogOpacity})`;
-    ctx.fillRect(0, 0, W, H);
+    const walls   = m.wallObjects;
+    const allSrcs = [
+      ...m.lightObjects.filter(o => o.lightType === "source" && !o.tokenId),
+      ...tokenSources
+    ];
 
-    // ---- 2. Corta áreas iluminadas (Luz tipo "cut" = sem raycasting) ----
+    // ---- 1. Desenha apenas as regiões de escuridão manual ----
+    if (hasDarkness) {
+      m.darknessObjects.forEach(o => this._fillShape(ctx, o, m.settings.fogOpacity));
+    }
+
+    // ---- 2. Se há luz e não há escuridão manual, escurece todo o mapa ----
+    if (hasLightSource && !hasDarkness) {
+      ctx.fillStyle = `rgba(0,0,0,${m.settings.fogOpacity})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // ---- 3. Corta áreas iluminadas (Luz tipo "cut" = sem raycasting) ----
     m.lightObjects
       .filter(o => o.lightType === "cut")
       .forEach(o => this._cutShape(ctx, o));
 
-    // ---- 3. Fontes de luz com raycasting ----
-    const walls   = m.wallObjects;
-    const allSrcs = [
-      ...m.lightObjects.filter(o => o.lightType === "source" && !o.tokenId),
-      ...m.getTokenLightSources()
-    ];
-
+    // ---- 4. Fontes de luz com raycasting ----
     allSrcs.forEach(src => {
       const size       = window.VTTGrid?.size || 50;
       const lightPx    = (src.lightRadius || 6)  * size;
@@ -125,9 +131,8 @@ LightPlugin.Canvas = {
       this._cutPoly(ctx, lightPoly);
     });
 
-    // ---- 4. Reaplica escuridão manual por cima ----
-    // Objetos de escuridão manual têm prioridade sobre fontes de luz
-    m.darknessObjects.forEach(o => this._fillShape(ctx, o, m.settings.fogOpacity));
+    // ---- 5. Com escuridão manual e luz juntas, o corte de luz remove trechos da sombra ----
+    // (não reaplicamos escuridão manual depois, pois isso anulava a iluminação)
 
     // ---- 6. Overlay especial do mestre ----
     if (m.settings.masterReveal) {

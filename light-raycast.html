@@ -26,10 +26,26 @@ LightPlugin.Raycast = {
   // ============================================================
 
   compute(origin, radius, walls, canvasW, canvasH) {
+    if (!walls.length) {
+      return this._circlePoly(origin, radius, 64);
+    }
     const segments = this._buildSegments(walls, origin, radius, canvasW, canvasH);
     const angles   = this._collectAngles(origin, segments);
     const rays     = this._castRays(origin, angles, segments, radius);
     return rays;
+  },
+
+  _circlePoly(origin, radius, resolution = 64) {
+    const pts = [];
+    for (let i = 0; i < resolution; i++) {
+      const angle = (i / resolution) * Math.PI * 2;
+      pts.push({
+        x: origin.x + Math.cos(angle) * radius,
+        y: origin.y + Math.sin(angle) * radius,
+        angle
+      });
+    }
+    return pts;
   },
 
   // ---- Constrói segmentos de parede + bounding box ----
