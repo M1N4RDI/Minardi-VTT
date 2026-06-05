@@ -3,6 +3,7 @@
 console.log('lighting-render carregado');
 
 window.Lighting = window.Lighting || {};
+
 Lighting.Render = {
   _canvas: null,
   _ctx: null,
@@ -11,139 +12,154 @@ Lighting.Render = {
   init() {
     if (this._canvas) return;
     const map = document.getElementById('map-container');
-    if (!map) {
-      setTimeout(() => this.init(), 200);
-      return;
-    }
+    if (!map) { setTimeout(() => this.init(), 200); return; }
+
     const c = document.createElement('canvas');
     c.id = 'lighting-overlay-canvas';
-    c.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:999;';
+    c.style.cssText =
+      'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:999;';
     map.appendChild(c);
     this._canvas = c;
     this._ctx = c.getContext('2d');
+
     this._sync();
     window.addEventListener('resize', () => this._sync());
+
+    // Observa redimensionamento do mapa
+    const ro = new ResizeObserver(() => this._sync());
+    ro.observe(map);
   },
 
   _sync() {
     const map = document.getElementById('map-container');
     if (!map || !this._canvas) return;
-    const w = map.clientWidth || map.offsetWidth;
-    const h = map.clientHeight || map.offsetHeight;
-    this._canvas.width = w;
+    const w = map.clientWidth  || map.offsetWidth  || 800;
+    const h = map.clientHeight || map.offsetHeight || 600;
+    this._canvas.width  = w;
     this._canvas.height = h;
     this.buildSpatialIndex();
+    // NÃO chama draw() aqui — evita escurecer o mapa automaticamente
   },
 
   buildSpatialIndex() {
-    // Quadtree para paredes
-    function QTNode(x, y, w, h, depth = 0) {
-      this.x = x;
-      this.y = y;
-      this.w = w;
-      this.h = h;
-      this.depth = depth;
-      this.segs = [];
-      this.children = null;
+    function QTNode(x, y, w, h, depth) {
+      this.x = x; this.y = y; this.w = w; this.h = h;
+      this.depth = depth || 0;
+      this.segs = []; this.children = null;
     }
-    QTNode.prototype.insert = function (seg) {
-      if (this.children) {
-        const boxes = this.children;
-        for (let i = 0; i < 4; i++) boxes[i].insert(seg);
-        return;
-      }
+    QTNode.prototype.insert = function(seg) {
+      if (this.children) { this.children.forEach(c => c.insert(seg)); return; }
       this.segs.push(seg);
       if (this.segs.length > 8 && this.depth < 8) {
         this.subdivide();
-        const old = this.segs;
-        this.segs = [];
-        for (let i = 0; i < old.length; i++) this.insert(old[i]);
+        const old = this.segs; this.segs = [];
+        old.forEach(s => this.insert(s));
       }
     };
-    QTNode.prototype.subdivide = function () {
-      const hw = this.w / 2,
-        hh = this.h / 2,
-        d = this.depth + 1;
+    QTNode.prototype.subdivide = function() {
+      const hw = this.w / 2, hh = this.h / 2, d = this.depth + 1;
       this.children = [
-        new QTNode(this.x, this.y, hw, hh, d),
-        new QTNode(this.x + hw, this.y, hw, hh, d),
-        new QTNode(this.x, this.y + hh, hw, hh, d),
+        new QTNode(this.x,      this.y,      hw, hh, d),
+        new QTNode(this.x + hw, this.y,      hw, hh, d),
+        new QTNode(this.x,      this.y + hh, hw, hh, d),
         new QTNode(this.x + hw, this.y + hh, hw, hh, d),
       ];
     };
 
-    const c = this._canvas;
-    if (!c) return;
-    const root = new QTNode(0, 0, c.width, c.height, 0);
-    const segs = Lighting.Model.walls.map((w) => ({
-      x1: w.p1.x,
-      y1: w.p1.y,
-      x2: w.p2.x,
-      y2: w.p2.y,
-      id: w.id,
-    }));
-    for (let i = 0; i < segs.length; i++) root.insert(segs[i]);
+    if (!this._canvas) return;
+    const root = new QTNode(0, 0, this._canvas.width, this._canvas.height, 0);
+    (Lighting.Model.walls || []).forEach(w => {
+      if (w && w.p1 && w.p2) root.insert({ x1: w.p1.x, y1: w.p1.y, x2: w.p2.x, y2: w.p2.y, id: w.id });
+    });
     this._spatialIndex = { root };
   },
 
   draw() {
-    if (!this._canvas) this.init();
-    const c = this._canvas;
-    if (!c) return;
+    if (!this._canvas) { this.init(); return; }
+    const c   = this._canvas;
     const ctx = this._ctx;
-    const W = c.width,
-      H = c.height;
+    const W   = c.width;
+    const H   = c.height;
+
+    // *** CORREÇÃO PRINCIPAL: se não estiver habilitado, limpa e sai ***
+    if (!Lighting.Model.enabled) {
+      ctx.clearRect(0, 0, W, H);
+      return;
+    }
+
+    // masterReveal: mestre vê tudo — overlay transparente (só paredes visíveis)
+    if (Lighting.Model.masterReveal) {
+      ctx.clearRect(0, 0, W, H);
+      this._drawWalls(ctx);
+      this._drawUI();
+      return;
+    }
+
+    // --- Pipeline normal ---
     ctx.clearRect(0, 0, W, H);
 
-    // fundo escuro base
-    ctx.fillStyle = 'rgba(0,0,0,0.9)';
+    // 1. Fundo escuro sobre o mapa inteiro
+    ctx.fillStyle = 'rgba(0,0,0,0.88)';
     ctx.fillRect(0, 0, W, H);
 
-    // desenhar objetos
-    Lighting.Model.objects.forEach((obj) => {
+    // 2. Recortar áreas iluminadas (destination-out remove a escuridão)
+    Lighting.Model.objects.forEach(obj => {
       if (!obj.visible) return;
+      if (obj.mode !== 'light') return;
 
       ctx.save();
 
-      if (obj.mode === 'dark') {
-        // áreas escuras são mantidas
-        // nada a fazer - já começamos com background escuro
-      } else if (obj.mode === 'light') {
-        // áreas iluminadas: remover escuridão
+      // Penumbra: cinza semitransparente levemente maior que a área iluminada
+      if (obj.shape === 'circle') {
+        const penPx = (obj.penumbra || 4) * (Lighting.Model.gridSize || 50);
+        const grad  = ctx.createRadialGradient(obj.x, obj.y, obj.radius, obj.x, obj.y, obj.radius + penPx);
+        grad.addColorStop(0,   'rgba(0,0,0,0.85)');
+        grad.addColorStop(1,   'rgba(0,0,0,0)');
         ctx.globalCompositeOperation = 'destination-out';
-        ctx.fillStyle = 'rgba(0,0,0,1)';
-        this._drawShape(ctx, obj);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(obj.x, obj.y, obj.radius + penPx, 0, Math.PI * 2);
         ctx.fill();
-
-        // penumbra: cinza
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = 'rgba(100,100,100,0.9)';
-        const penRadius = (obj.penumbra || 12) * (Lighting.Model.gridSize || 50);
-        if (obj.shape === 'circle') {
-          ctx.beginPath();
-          ctx.arc(obj.x, obj.y, obj.radius + penRadius, 0, Math.PI * 2);
-          ctx.fill();
-        }
       }
+
+      // Luz plena: recorte total
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = 'rgba(0,0,0,1)';
+      this._drawShape(ctx, obj);
+      ctx.fill();
 
       ctx.restore();
     });
 
-    // desenhar paredes
+    // 3. Reaplica escuridão manual (áreas dark têm prioridade sobre luz)
+    Lighting.Model.objects.forEach(obj => {
+      if (!obj.visible || obj.mode !== 'dark') return;
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = 'rgba(0,0,0,0.95)';
+      this._drawShape(ctx, obj);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // 4. Paredes e UI
+    this._drawWalls(ctx);
+    this._drawUI();
+  },
+
+  _drawWalls(ctx) {
+    if (!Lighting.Model.walls || !Lighting.Model.walls.length) return;
     ctx.save();
-    ctx.strokeStyle = 'rgba(200,200,200,0.3)';
-    ctx.lineWidth = 2;
-    Lighting.Model.walls.forEach((wall) => {
-      if (!wall.visible) return;
+    ctx.strokeStyle = 'rgba(200,200,200,0.35)';
+    ctx.lineWidth   = 2;
+    Lighting.Model.walls.forEach(wall => {
+      if (!wall.visible || !wall.p1 || !wall.p2) return;
       ctx.beginPath();
       ctx.moveTo(wall.p1.x, wall.p1.y);
       ctx.lineTo(wall.p2.x, wall.p2.y);
       ctx.stroke();
     });
     ctx.restore();
-
-    // UI overlay: seleção, handles, preview
-    this._drawUI();
   },
 
   _drawShape(ctx, obj) {
@@ -153,153 +169,135 @@ Lighting.Render = {
       ctx.beginPath();
       ctx.arc(obj.x, obj.y, obj.radius, 0, Math.PI * 2);
       ctx.fill();
-    } else if (obj.shape === 'polygon' && obj.points) {
+    } else if (obj.shape === 'polygon' && obj.points && obj.points.length > 0) {
       ctx.beginPath();
-      if (obj.points.length > 0) {
-        ctx.moveTo(obj.points[0].x, obj.points[0].y);
-        for (let i = 1; i < obj.points.length; i++) {
-          ctx.lineTo(obj.points[i].x, obj.points[i].y);
-        }
-        ctx.closePath();
-      }
+      ctx.moveTo(obj.points[0].x, obj.points[0].y);
+      for (let i = 1; i < obj.points.length; i++) ctx.lineTo(obj.points[i].x, obj.points[i].y);
+      ctx.closePath();
       ctx.fill();
     }
   },
 
   _drawUI() {
     const ctx = this._ctx;
+    if (!ctx) return;
+
+    // Sem referência a Lighting.Input se não existir
+    if (!window.Lighting || !Lighting.Input) return;
+
     const selectedId = Lighting.Input.selectedObjectId;
     const activeTool = Lighting.Input.activeTool;
+    const toolState  = Lighting.Input.toolState || {};
 
-    // desenhar objeto selecionado
+    // Objeto selecionado
     if (selectedId) {
       const obj = Lighting.Model.getObject(selectedId);
       if (obj) {
         ctx.save();
         ctx.strokeStyle = 'rgba(255,220,100,0.95)';
-        ctx.lineWidth = 2;
-        this._drawShape(ctx, obj);
-        ctx.stroke();
-
-        // draw handles
-        if (!obj.locked) {
-          this._drawHandles(ctx, obj);
-        }
-
-        // mostra o raio externo da penumbra para lights
-        if (obj.mode === 'light' && obj.shape === 'circle') {
-          ctx.strokeStyle = 'rgba(255,200,100,0.5)';
-          ctx.setLineDash([4, 4]);
-          const penRadius = (obj.penumbra || 12) * (Lighting.Model.gridSize || 50);
-          ctx.beginPath();
-          ctx.arc(obj.x, obj.y, obj.radius + penRadius, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
-
+        ctx.lineWidth   = 2;
+        ctx.globalCompositeOperation = 'source-over';
+        this._strokeShape(ctx, obj);
+        if (!obj.locked) this._drawHandles(ctx, obj);
         ctx.restore();
       }
     }
 
-    // preview de tool em progresso
-    if (activeTool === 'rect' && Lighting.Input.toolState.start && Lighting.Input.toolState.current) {
-      const s = Lighting.Input.toolState;
-      ctx.save();
-      ctx.strokeStyle = 'rgba(80,200,100,0.8)';
-      ctx.fillStyle = 'rgba(80,200,100,0.2)';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([4, 4]);
+    // Preview de ferramenta em andamento
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+
+    if (activeTool === 'rect' && toolState.start && toolState.current) {
+      const s  = toolState;
       const x1 = Math.min(s.start.x, s.current.x);
       const y1 = Math.min(s.start.y, s.current.y);
-      const w = Math.abs(s.current.x - s.start.x);
-      const h = Math.abs(s.current.y - s.start.y);
+      const w  = Math.abs(s.current.x - s.start.x);
+      const h  = Math.abs(s.current.y - s.start.y);
+      ctx.strokeStyle = 'rgba(80,200,100,0.9)';
+      ctx.fillStyle   = 'rgba(80,200,100,0.2)';
+      ctx.lineWidth   = 2;
+      ctx.setLineDash([4, 4]);
       ctx.fillRect(x1, y1, w, h);
       ctx.strokeRect(x1, y1, w, h);
-      ctx.restore();
     }
 
-    if (activeTool === 'circle' && Lighting.Input.toolState.start && Lighting.Input.toolState.current) {
-      const s = Lighting.Input.toolState;
+    if (activeTool === 'circle' && toolState.start && toolState.current) {
+      const s  = toolState;
       const dx = s.current.x - s.start.x;
       const dy = s.current.y - s.start.y;
-      const r = Math.sqrt(dx * dx + dy * dy);
-      ctx.save();
-      ctx.strokeStyle = 'rgba(80,200,100,0.8)';
-      ctx.fillStyle = 'rgba(80,200,100,0.2)';
-      ctx.lineWidth = 2;
+      const r  = Math.sqrt(dx * dx + dy * dy);
+      ctx.strokeStyle = 'rgba(80,200,100,0.9)';
+      ctx.fillStyle   = 'rgba(80,200,100,0.2)';
+      ctx.lineWidth   = 2;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
       ctx.arc(s.start.x, s.start.y, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      ctx.restore();
     }
 
-    if (activeTool === 'polygon' && Lighting.Input.toolState.points) {
-      const pts = Lighting.Input.toolState.points;
-      ctx.save();
-      ctx.strokeStyle = 'rgba(80,200,100,0.8)';
-      ctx.fillStyle = 'rgba(80,200,100,0.2)';
-      ctx.lineWidth = 2;
+    if (activeTool === 'polygon' && toolState.points && toolState.points.length > 0) {
+      const pts = toolState.points;
+      ctx.strokeStyle = 'rgba(80,200,100,0.9)';
+      ctx.fillStyle   = 'rgba(80,200,100,0.2)';
+      ctx.lineWidth   = 2;
       ctx.setLineDash([4, 4]);
-      if (pts.length > 0) {
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < pts.length; i++) {
-          ctx.lineTo(pts[i].x, pts[i].y);
-        }
-        if (Lighting.Input.toolState.current) {
-          ctx.lineTo(Lighting.Input.toolState.current.x, Lighting.Input.toolState.current.y);
-        }
-        ctx.stroke();
-        // pontos
-        pts.forEach((p) => {
-          ctx.fillStyle = 'rgba(80,200,100,0.9)';
-          ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
-        });
-      }
-      ctx.restore();
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      if (toolState.current) ctx.lineTo(toolState.current.x, toolState.current.y);
+      ctx.stroke();
+      pts.forEach(p => {
+        ctx.fillStyle = 'rgba(80,200,100,0.9)';
+        ctx.setLineDash([]);
+        ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+      });
     }
 
-    if (activeTool === 'wall' && Lighting.Input.toolState.p1) {
-      const p1 = Lighting.Input.toolState.p1;
-      const current = Lighting.Input.toolState.current;
-      ctx.save();
-      ctx.strokeStyle = 'rgba(200,100,100,0.8)';
-      ctx.lineWidth = 3;
+    if (activeTool === 'wall' && toolState.p1) {
+      ctx.strokeStyle = 'rgba(200,100,100,0.9)';
+      ctx.lineWidth   = 3;
       ctx.setLineDash([6, 6]);
       ctx.beginPath();
-      ctx.moveTo(p1.x, p1.y);
-      if (current) {
-        ctx.lineTo(current.x, current.y);
-      }
+      ctx.moveTo(toolState.p1.x, toolState.p1.y);
+      if (toolState.current) ctx.lineTo(toolState.current.x, toolState.current.y);
       ctx.stroke();
-      ctx.restore();
+    }
+
+    ctx.setLineDash([]);
+    ctx.restore();
+  },
+
+  _strokeShape(ctx, obj) {
+    if (obj.shape === 'rect') {
+      ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
+    } else if (obj.shape === 'circle') {
+      ctx.beginPath();
+      ctx.arc(obj.x, obj.y, obj.radius, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (obj.shape === 'polygon' && obj.points && obj.points.length > 0) {
+      ctx.beginPath();
+      ctx.moveTo(obj.points[0].x, obj.points[0].y);
+      for (let i = 1; i < obj.points.length; i++) ctx.lineTo(obj.points[i].x, obj.points[i].y);
+      ctx.closePath();
+      ctx.stroke();
     }
   },
 
   _drawHandles(ctx, obj) {
-    const handleSize = 8;
+    const s = 8;
+    ctx.fillStyle = 'rgba(255,220,100,0.95)';
+    ctx.globalCompositeOperation = 'source-over';
     if (obj.shape === 'rect') {
-      const corners = [
-        [obj.x, obj.y],
-        [obj.x + obj.width, obj.y],
-        [obj.x, obj.y + obj.height],
-        [obj.x + obj.width, obj.y + obj.height],
-      ];
-      corners.forEach((corner) => {
-        ctx.fillStyle = 'rgba(255,220,100,0.9)';
-        ctx.fillRect(corner[0] - handleSize / 2, corner[1] - handleSize / 2, handleSize, handleSize);
-      });
+      [[obj.x, obj.y], [obj.x + obj.width, obj.y],
+       [obj.x, obj.y + obj.height], [obj.x + obj.width, obj.y + obj.height]]
+        .forEach(([cx, cy]) => ctx.fillRect(cx - s/2, cy - s/2, s, s));
     } else if (obj.shape === 'circle') {
-      ctx.fillStyle = 'rgba(255,220,100,0.9)';
-      ctx.fillRect(obj.x - handleSize / 2, obj.y - handleSize / 2, handleSize, handleSize);
-      ctx.fillRect(obj.x + obj.radius - handleSize / 2, obj.y - handleSize / 2, handleSize, handleSize);
+      ctx.fillRect(obj.x - s/2, obj.y - s/2, s, s);
+      ctx.fillRect(obj.x + obj.radius - s/2, obj.y - s/2, s, s);
     }
   },
 };
 
-setTimeout(() => {
-  Lighting.Render.init();
-}, 300);
+setTimeout(() => { Lighting.Render.init(); }, 300);
 </script>

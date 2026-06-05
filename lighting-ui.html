@@ -8,7 +8,7 @@ Lighting.UI = {
   initialized: false,
   sidebar: null,
   toolButtons: {},
-  contextMenu: null,
+  _enableBtn: null,
 
   init() {
     if (this.initialized) return;
@@ -19,10 +19,6 @@ Lighting.UI = {
       if (!sidebar) { setTimeout(() => this.init(), 200); return; }
       this.sidebar = sidebar;
       this._createPanel();
-
-      // *** CORREÇÃO: NÃO forçar VTTMode.set('lighting') aqui ***
-      // O modo só muda quando o usuário clicar no botão.
-
       Lighting.Input.init();
       Lighting.Render.init();
       this.refresh();
@@ -32,41 +28,59 @@ Lighting.UI = {
   _createPanel() {
     const cat = document.createElement('div');
     cat.className = 'category';
-    cat.id = 'cat-lighting';   // ← ID para o VTTMode
+    cat.id = 'cat-lighting';
 
     const title = document.createElement('div');
     title.className = 'category-title';
     title.innerText = 'Iluminação';
     cat.appendChild(title);
 
-    // ---- Botão de MODO ----
+    // ---- Botão de MODO (ativa o mouse para iluminação) ----
     const modeBtn = document.createElement('button');
     modeBtn.id = 'lighting-mode-btn';
     modeBtn.className = 'mode-btn mode-lighting';
     modeBtn.textContent = '🕯 ATIVAR ILUMINAÇÃO';
     modeBtn.onclick = () => VTTMode.setMode('lighting');
-
-    // Registra no VTTMode
-    VTTMode._modeBtns.lighting  = modeBtn;
+    VTTMode._modeBtns.lighting    = modeBtn;
     VTTMode._categoryIds.lighting = 'cat-lighting';
-
     cat.appendChild(modeBtn);
 
-    // FERRAMENTAS
-    const toolsSection = document.createElement('div');
-    toolsSection.style.marginBottom = '16px';
+    // ---- Toggle de iluminação (liga/desliga o overlay escuro) ----
+    const enableBtn = document.createElement('button');
+    enableBtn.id = 'lighting-enable-btn';
+    enableBtn.className = 'btn-full';
+    enableBtn.style.marginTop = '6px';
+    enableBtn.style.background = Lighting.Model.enabled ? '#7a3a00' : '#333';
+    enableBtn.textContent = Lighting.Model.enabled ? '🌑 Iluminação: ON' : '☀ Iluminação: OFF';
+    enableBtn.title = 'Liga/desliga o fog of war sem sair do modo de edição';
+    enableBtn.onclick = () => {
+      Lighting.Model.enabled = !Lighting.Model.enabled;
+      Lighting.Model._save();
+      enableBtn.textContent = Lighting.Model.enabled ? '🌑 Iluminação: ON' : '☀ Iluminação: OFF';
+      enableBtn.style.background = Lighting.Model.enabled ? '#7a3a00' : '#333';
+      Lighting.Render.draw();
+    };
+    this._enableBtn = enableBtn;
+    cat.appendChild(enableBtn);
 
+    // ---- masterReveal ----
+    const revealBtn = this._createActionButton('👁 Mostrar Tudo (Mestre)', () => {
+      Lighting.Model.masterReveal = !Lighting.Model.masterReveal;
+      Lighting.Model._save();
+      revealBtn.style.background = Lighting.Model.masterReveal ? '#1a3a5c' : '';
+      Lighting.Render.draw();
+    });
+    revealBtn.style.background = Lighting.Model.masterReveal ? '#1a3a5c' : '';
+    cat.appendChild(revealBtn);
+
+    // ---- FERRAMENTAS ----
     const toolsLabel = document.createElement('div');
-    toolsLabel.style.fontSize = '0.8em';
-    toolsLabel.style.fontWeight = 'bold';
-    toolsLabel.style.marginBottom = '8px';
-    toolsLabel.innerText = 'FERRAMENTAS';
-    toolsSection.appendChild(toolsLabel);
+    toolsLabel.style.cssText = 'font-size:0.78em;font-weight:bold;margin:12px 0 6px;opacity:0.8;text-transform:uppercase;';
+    toolsLabel.innerText = 'Ferramentas';
+    cat.appendChild(toolsLabel);
 
     const toolGrid = document.createElement('div');
-    toolGrid.style.display = 'grid';
-    toolGrid.style.gridTemplateColumns = 'repeat(5, 1fr)';
-    toolGrid.style.gap = '6px';
+    toolGrid.style.cssText = 'display:grid;grid-template-columns:repeat(5,1fr);gap:5px;';
 
     const tools = [
       { id: 'select',  icon: '🖱',  title: 'Selecionar' },
@@ -76,13 +90,13 @@ Lighting.UI = {
       { id: 'wall',    icon: '🚧', title: 'Parede' },
     ];
 
-    tools.forEach((tool) => {
+    tools.forEach(tool => {
       const btn = document.createElement('button');
-      btn.className = 'lighting-tool-btn';
       btn.title = tool.title;
       btn.innerHTML = tool.icon;
       btn.style.cssText =
-        'padding:12px;font-size:1.2em;border:2px solid transparent;border-radius:6px;background:rgba(100,100,100,0.3);cursor:pointer;transition:all 0.2s;';
+        'padding:10px;font-size:1.1em;border:2px solid transparent;border-radius:6px;' +
+        'background:rgba(100,100,100,0.3);cursor:pointer;transition:all 0.15s;';
       btn.addEventListener('click', () => {
         Lighting.Input.setActiveTool(tool.id);
         this._updateToolButtons();
@@ -91,89 +105,50 @@ Lighting.UI = {
       this.toolButtons[tool.id] = btn;
       toolGrid.appendChild(btn);
     });
+    cat.appendChild(toolGrid);
 
-    toolsSection.appendChild(toolGrid);
-    cat.appendChild(toolsSection);
-
-    // AÇÕES GLOBAIS
-    const actionsSection = document.createElement('div');
-    actionsSection.style.marginBottom = '16px';
-
+    // ---- AÇÕES ----
     const actionsLabel = document.createElement('div');
-    actionsLabel.style.fontSize = '0.8em';
-    actionsLabel.style.fontWeight = 'bold';
-    actionsLabel.style.marginBottom = '8px';
-    actionsLabel.innerText = 'AÇÕES';
-    actionsSection.appendChild(actionsLabel);
+    actionsLabel.style.cssText = 'font-size:0.78em;font-weight:bold;margin:12px 0 6px;opacity:0.8;text-transform:uppercase;';
+    actionsLabel.innerText = 'Ações Rápidas';
+    cat.appendChild(actionsLabel);
 
-    const actionsGrid = document.createElement('div');
-    actionsGrid.style.display = 'grid';
-    actionsGrid.style.gap = '6px';
-
-    const coverBtn = this._createActionButton('🌑 Cobrir Mapa', () => {
-      Lighting.Model.addObject({ name: 'Mapa Coberto', shape: 'rect', x: 0, y: 0, width: 99999, height: 99999 });
+    const coverBtn = this._createActionButton('🌑 Cobrir Mapa Todo', () => {
+      Lighting.Model.addObject({ name: 'Cobertura total', shape: 'rect', x: 0, y: 0, width: 99999, height: 99999, mode: 'dark' });
       Lighting.Model._save();
       this.refresh();
       Lighting.Render.draw();
     });
-    actionsGrid.appendChild(coverBtn);
+    cat.appendChild(coverBtn);
 
-    const revealBtn = this._createActionButton('☀ Mostrar Tudo', () => {
-      Lighting.Model.masterReveal = !Lighting.Model.masterReveal;
-      Lighting.Render.draw();
-      revealBtn.style.opacity = Lighting.Model.masterReveal ? '1' : '0.7';
-    });
-    actionsGrid.appendChild(revealBtn);
-
-    actionsSection.appendChild(actionsGrid);
-    cat.appendChild(actionsSection);
-
-    // LISTA DE OBJETOS
-    const listSection = document.createElement('div');
-    listSection.style.marginBottom = '16px';
-
+    // ---- LISTA DE OBJETOS ----
     const listLabel = document.createElement('div');
-    listLabel.style.fontSize = '0.8em';
-    listLabel.style.fontWeight = 'bold';
-    listLabel.style.marginBottom = '8px';
-    listLabel.innerText = 'OBJETOS';
-    listSection.appendChild(listLabel);
+    listLabel.style.cssText = 'font-size:0.78em;font-weight:bold;margin:12px 0 6px;opacity:0.8;text-transform:uppercase;';
+    listLabel.innerText = 'Objetos';
+    cat.appendChild(listLabel);
 
     const objectList = document.createElement('div');
     objectList.id = 'lighting-object-list';
-    objectList.style.maxHeight = '200px';
-    objectList.style.overflowY = 'auto';
-    objectList.style.fontSize = '0.85em';
-    listSection.appendChild(objectList);
-    cat.appendChild(listSection);
+    objectList.style.cssText = 'max-height:180px;overflow-y:auto;font-size:0.85em;';
+    cat.appendChild(objectList);
 
-    // PAINEL DE PROPRIEDADES
-    const propsSection = document.createElement('div');
+    // ---- PROPRIEDADES ----
     const propsLabel = document.createElement('div');
-    propsLabel.style.fontSize = '0.8em';
-    propsLabel.style.fontWeight = 'bold';
-    propsLabel.style.marginBottom = '8px';
-    propsLabel.innerText = 'PROPRIEDADES';
-    propsSection.appendChild(propsLabel);
+    propsLabel.style.cssText = 'font-size:0.78em;font-weight:bold;margin:12px 0 6px;opacity:0.8;text-transform:uppercase;';
+    propsLabel.innerText = 'Propriedades';
+    cat.appendChild(propsLabel);
 
     const propPanel = document.createElement('div');
     propPanel.id = 'lighting-props-panel';
     propPanel.style.fontSize = '0.85em';
-    propsSection.appendChild(propPanel);
-    cat.appendChild(propsSection);
+    cat.appendChild(propPanel);
 
     this.sidebar.appendChild(cat);
 
-    // Inicializa colapso para esta categoria
-    if (typeof initCollapseForCategory === 'function') {
-      initCollapseForCategory(cat);
-    }
+    if (typeof initCollapseForCategory === 'function') initCollapseForCategory(cat);
 
-    // Notifica o VTTMode para reprocessar o estado atual
-    // (a categoria recém-criada precisa saber se está dimmed ou não)
-    setTimeout(() => {
-      if (window.VTTMode) VTTMode.setMode(VTTMode.active);
-    }, 100);
+    // Notifica VTTMode sobre a nova categoria
+    setTimeout(() => { if (window.VTTMode) VTTMode.setMode(VTTMode.active); }, 100);
   },
 
   _createActionButton(label, action) {
@@ -185,15 +160,15 @@ Lighting.UI = {
   },
 
   _updateToolButtons() {
-    const active = Lighting.Input.activeTool;
-    Object.keys(this.toolButtons).forEach((key) => {
+    const active = Lighting.Input ? Lighting.Input.activeTool : 'select';
+    Object.keys(this.toolButtons).forEach(key => {
       const btn = this.toolButtons[key];
       if (key === active) {
-        btn.style.background = 'rgba(150,200,255,0.6)';
-        btn.style.borderColor = 'rgba(200,230,255,0.8)';
+        btn.style.background   = 'rgba(150,200,255,0.5)';
+        btn.style.borderColor  = 'rgba(200,230,255,0.8)';
       } else {
-        btn.style.background = 'rgba(100,100,100,0.3)';
-        btn.style.borderColor = 'transparent';
+        btn.style.background   = 'rgba(100,100,100,0.3)';
+        btn.style.borderColor  = 'transparent';
       }
     });
   },
@@ -202,6 +177,11 @@ Lighting.UI = {
     this._updateToolButtons();
     this._renderObjectList();
     this._renderProperties();
+    // Sincroniza botão de enable
+    if (this._enableBtn) {
+      this._enableBtn.textContent = Lighting.Model.enabled ? '🌑 Iluminação: ON' : '☀ Iluminação: OFF';
+      this._enableBtn.style.background = Lighting.Model.enabled ? '#7a3a00' : '#333';
+    }
   },
 
   _renderObjectList() {
@@ -209,46 +189,44 @@ Lighting.UI = {
     if (!listEl) return;
     listEl.innerHTML = '';
 
-    const darkObjs  = Lighting.Model.objects.filter((o) => o.mode === 'dark');
-    const lightObjs = Lighting.Model.objects.filter((o) => o.mode === 'light');
+    const darkObjs  = Lighting.Model.objects.filter(o => o.mode === 'dark');
+    const lightObjs = Lighting.Model.objects.filter(o => o.mode === 'light');
 
-    if (darkObjs.length  > 0) this._createListGroup(listEl, '▼ Áreas Escuras',    darkObjs);
-    if (lightObjs.length > 0) this._createListGroup(listEl, '▼ Áreas Iluminadas', lightObjs);
-    if (Lighting.Model.walls.length > 0) this._createWallGroup(listEl);
+    if (darkObjs.length)  this._createListGroup(listEl, '▼ Áreas Escuras',    darkObjs);
+    if (lightObjs.length) this._createListGroup(listEl, '▼ Áreas Iluminadas', lightObjs);
+    if (Lighting.Model.walls.length) this._createWallGroup(listEl);
 
     if (!darkObjs.length && !lightObjs.length && !Lighting.Model.walls.length) {
       const empty = document.createElement('div');
-      empty.style.opacity = '0.6';
-      empty.innerText = 'Nenhum objeto.';
+      empty.style.cssText = 'opacity:0.6;padding:6px;';
+      empty.innerText = 'Nenhum objeto. Use as ferramentas acima.';
       listEl.appendChild(empty);
     }
   },
 
   _createListGroup(parent, label, objects) {
     const group = document.createElement('div');
-    group.style.marginBottom = '8px';
+    group.style.marginBottom = '6px';
 
     const header = document.createElement('div');
-    header.style.fontWeight = 'bold';
-    header.style.fontSize = '0.8em';
-    header.style.marginBottom = '4px';
+    header.style.cssText = 'font-weight:bold;font-size:0.8em;margin-bottom:3px;opacity:0.8;';
     header.innerText = label;
     group.appendChild(header);
 
-    objects.forEach((obj) => {
+    objects.forEach(obj => {
       const item = document.createElement('div');
-      item.style.padding = '6px';
-      item.style.borderRadius = '4px';
-      item.style.background = Lighting.Input.selectedObjectId === obj.id ? 'rgba(100,150,200,0.3)' : 'transparent';
-      item.style.cursor = 'pointer';
-      item.style.fontSize = '0.85em';
+      item.style.cssText =
+        'padding:5px 6px;border-radius:4px;cursor:pointer;font-size:0.85em;' +
+        (Lighting.Input && Lighting.Input.selectedObjectId === obj.id
+          ? 'background:rgba(100,150,200,0.35);'
+          : 'background:transparent;');
       item.innerText = obj.name;
       item.addEventListener('click', () => {
         Lighting.Input.selectedObjectId = obj.id;
         this.refresh();
         Lighting.Render.draw();
       });
-      item.addEventListener('contextmenu', (e) => {
+      item.addEventListener('contextmenu', e => {
         e.preventDefault();
         this.showContextMenu(obj.id, { x: e.clientX, y: e.clientY });
       });
@@ -260,22 +238,28 @@ Lighting.UI = {
 
   _createWallGroup(parent) {
     const group = document.createElement('div');
-    group.style.marginBottom = '8px';
+    group.style.marginBottom = '6px';
 
     const header = document.createElement('div');
-    header.style.fontWeight = 'bold';
-    header.style.fontSize = '0.8em';
-    header.style.marginBottom = '4px';
+    header.style.cssText = 'font-weight:bold;font-size:0.8em;margin-bottom:3px;opacity:0.8;';
     header.innerText = '▼ Paredes';
     group.appendChild(header);
 
     Lighting.Model.walls.forEach((wall, idx) => {
       const item = document.createElement('div');
-      item.style.padding = '6px';
-      item.style.borderRadius = '4px';
-      item.style.background = 'transparent';
-      item.style.fontSize = '0.85em';
-      item.innerText = `Parede ${idx + 1}`;
+      item.style.cssText = 'padding:5px 6px;border-radius:4px;font-size:0.85em;display:flex;justify-content:space-between;align-items:center;';
+      item.innerHTML = `<span>Parede ${idx + 1}</span>`;
+      const del = document.createElement('button');
+      del.innerText = '✕';
+      del.style.cssText = 'background:none;border:none;color:#c0392b;cursor:pointer;padding:0 4px;';
+      del.onclick = () => {
+        Lighting.Model.removeWall(wall.id);
+        Lighting.Model._save();
+        Lighting.Render.buildSpatialIndex();
+        Lighting.Render.draw();
+        this.refresh();
+      };
+      item.appendChild(del);
       group.appendChild(item);
     });
 
@@ -287,10 +271,10 @@ Lighting.UI = {
     if (!propsEl) return;
     propsEl.innerHTML = '';
 
-    const selectedId = Lighting.Input.selectedObjectId;
+    const selectedId = Lighting.Input ? Lighting.Input.selectedObjectId : null;
     if (!selectedId) {
       const nosel = document.createElement('div');
-      nosel.style.opacity = '0.7';
+      nosel.style.cssText = 'opacity:0.6;padding:4px;';
       nosel.innerText = 'Selecione um objeto.';
       propsEl.appendChild(nosel);
       return;
@@ -299,106 +283,95 @@ Lighting.UI = {
     const obj = Lighting.Model.getObject(selectedId);
     if (!obj) return;
 
-    this._createPropField(propsEl, 'Nome', obj.name, (val) => {
+    this._createPropField(propsEl, 'Nome', obj.name, val => {
       Lighting.Model.updateObject(obj.id, { name: val });
       Lighting.Model._save();
       this._renderObjectList();
     });
 
-    const typeRow = document.createElement('div');
-    typeRow.style.marginBottom = '8px';
-    const typeLabel = document.createElement('label'); typeLabel.innerText = 'Tipo'; typeRow.appendChild(typeLabel);
-    const typeDiv = document.createElement('div'); typeDiv.style.fontSize = '0.85em';
-    typeDiv.innerText = obj.mode === 'dark' ? 'Área Escura' : 'Área Iluminada';
-    typeRow.appendChild(typeDiv); propsEl.appendChild(typeRow);
-
-    const shapeRow = document.createElement('div');
-    shapeRow.style.marginBottom = '8px';
-    const shapeLabel = document.createElement('label'); shapeLabel.innerText = 'Forma'; shapeRow.appendChild(shapeLabel);
-    const shapeDiv = document.createElement('div'); shapeDiv.style.fontSize = '0.85em';
-    const shapeNames = { rect: 'Retângulo', circle: 'Círculo', polygon: 'Polígono' };
-    shapeDiv.innerText = shapeNames[obj.shape] || obj.shape;
-    shapeRow.appendChild(shapeDiv); propsEl.appendChild(shapeRow);
-
-    const lockedRow = document.createElement('div');
-    lockedRow.style.marginBottom = '8px';
-    const lockedLabel = document.createElement('label'); lockedLabel.innerText = 'Bloqueada'; lockedRow.appendChild(lockedLabel);
-    const lockedCheckbox = document.createElement('input');
-    lockedCheckbox.type = 'checkbox'; lockedCheckbox.checked = obj.locked;
-    lockedCheckbox.addEventListener('change', () => {
-      Lighting.Model.updateObject(obj.id, { locked: lockedCheckbox.checked });
-      Lighting.Model._save(); this.refresh();
-    });
-    lockedRow.appendChild(lockedCheckbox); propsEl.appendChild(lockedRow);
+    // Tipo e forma (readonly)
+    const info = document.createElement('div');
+    info.style.cssText = 'font-size:0.8em;opacity:0.7;margin-bottom:8px;';
+    info.innerText = `${obj.mode === 'dark' ? 'Escuridão' : 'Luz'} · ${({ rect: 'Retângulo', circle: 'Círculo', polygon: 'Polígono' })[obj.shape] || obj.shape}`;
+    propsEl.appendChild(info);
 
     if (obj.mode === 'light') {
-      this._createPropField(propsEl, 'Luminosidade (grid)', obj.luminosity || 6, (val) => {
+      this._createPropField(propsEl, 'Luminosidade (grid)', obj.luminosity || 6, val => {
         Lighting.Model.updateObject(obj.id, { luminosity: Number(val) || 1 });
         Lighting.Model._save(); Lighting.Render.draw();
       }, 'number');
-      this._createPropField(propsEl, 'Penumbra (grid)', obj.penumbra || 12, (val) => {
+      this._createPropField(propsEl, 'Penumbra (grid)', obj.penumbra || 4, val => {
         Lighting.Model.updateObject(obj.id, { penumbra: Number(val) || 0 });
         Lighting.Model._save(); Lighting.Render.draw();
       }, 'number');
     }
 
     const buttonRow = document.createElement('div');
-    buttonRow.style.display = 'grid';
-    buttonRow.style.gridTemplateColumns = '1fr 1fr';
-    buttonRow.style.gap = '6px';
-    buttonRow.style.marginTop = '10px';
+    buttonRow.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:8px;';
 
     const toggleBtn = document.createElement('button');
-    toggleBtn.className = 'btn-full'; toggleBtn.style.fontSize = '0.75em';
+    toggleBtn.className = 'btn-full';
+    toggleBtn.style.fontSize = '0.72em';
     toggleBtn.innerText = obj.mode === 'dark' ? 'Iluminar' : 'Escurecer';
-    toggleBtn.addEventListener('click', () => {
-      Lighting.Model.toggleObjectMode(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw();
-    });
+    toggleBtn.onclick = () => { Lighting.Model.toggleObjectMode(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); };
     buttonRow.appendChild(toggleBtn);
 
     const dupBtn = document.createElement('button');
-    dupBtn.className = 'btn-full'; dupBtn.style.fontSize = '0.75em'; dupBtn.innerText = 'Duplicar';
-    dupBtn.addEventListener('click', () => {
-      Lighting.Model.duplicateObject(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw();
-    });
+    dupBtn.className = 'btn-full';
+    dupBtn.style.fontSize = '0.72em';
+    dupBtn.innerText = 'Duplicar';
+    dupBtn.onclick = () => { Lighting.Model.duplicateObject(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); };
     buttonRow.appendChild(dupBtn);
 
     const delBtn = document.createElement('button');
-    delBtn.className = 'btn-full'; delBtn.style.fontSize = '0.75em'; delBtn.style.gridColumn = '1 / -1';
+    delBtn.className = 'btn-full';
+    delBtn.style.cssText = 'font-size:0.72em;grid-column:1/-1;background:#7a2a2a;';
     delBtn.innerText = 'Excluir';
-    delBtn.addEventListener('click', () => {
-      Lighting.Model.removeObject(obj.id); Lighting.Model._save();
-      Lighting.Input.selectedObjectId = null; this.refresh(); Lighting.Render.draw();
-    });
+    delBtn.onclick = () => {
+      Lighting.Model.removeObject(obj.id);
+      Lighting.Model._save();
+      Lighting.Input.selectedObjectId = null;
+      this.refresh();
+      Lighting.Render.draw();
+    };
     buttonRow.appendChild(delBtn);
 
     propsEl.appendChild(buttonRow);
   },
 
   _createPropField(parent, label, value, onChange, type = 'text') {
-    const row = document.createElement('div'); row.style.marginBottom = '8px';
-    const lbl = document.createElement('label'); lbl.innerText = label; row.appendChild(lbl);
-    const input = document.createElement('input'); input.type = type; input.value = value;
-    input.addEventListener('change', (e) => onChange(e.target.value));
-    row.appendChild(input); parent.appendChild(row);
+    const row = document.createElement('div');
+    row.style.marginBottom = '7px';
+    const lbl = document.createElement('label');
+    lbl.innerText = label;
+    row.appendChild(lbl);
+    const input = document.createElement('input');
+    input.type = type;
+    input.value = value;
+    input.addEventListener('change', e => onChange(e.target.value));
+    row.appendChild(input);
+    parent.appendChild(row);
   },
 
   showContextMenu(objId, pos) {
     const obj = Lighting.Model.getObject(objId);
     if (!obj) return;
-    if (this.contextMenu) this.contextMenu.remove();
+
+    // Remove menu anterior
+    const old = document.getElementById('lighting-ctx-menu');
+    if (old) old.remove();
 
     const menu = document.createElement('div');
-    menu.style.cssText = `
-      position: fixed; left: ${pos.x}px; top: ${pos.y}px;
-      background: rgba(30,30,30,0.95); border: 1px solid rgba(200,200,200,0.3);
-      border-radius: 6px; padding: 4px; z-index: 10000; font-size: 0.85em;
-      min-width: 180px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    `;
+    menu.id = 'lighting-ctx-menu';
+    menu.style.cssText =
+      `position:fixed;left:${pos.x}px;top:${pos.y}px;` +
+      'background:rgba(28,28,28,0.97);border:1px solid rgba(200,200,200,0.25);' +
+      'border-radius:7px;padding:4px;z-index:10000;font-size:0.85em;min-width:180px;' +
+      'box-shadow:0 4px 14px rgba(0,0,0,0.6);';
 
     const items = [
       { icon: '✏️', label: 'Renomear',
-        action: () => this._renameObject(obj) },
+        action: () => { const n = prompt('Novo nome:', obj.name); if (n) { Lighting.Model.updateObject(obj.id, { name: n }); Lighting.Model._save(); this.refresh(); } } },
       { icon: obj.mode === 'dark' ? '💡' : '🌑',
         label: obj.mode === 'dark' ? 'Iluminar' : 'Escurecer',
         action: () => { Lighting.Model.toggleObjectMode(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); } },
@@ -411,24 +384,25 @@ Lighting.UI = {
         action: () => { Lighting.Model.removeObject(obj.id); Lighting.Model._save(); Lighting.Input.selectedObjectId = null; this.refresh(); Lighting.Render.draw(); } },
     ];
 
-    items.forEach((item) => {
+    items.forEach(item => {
       const btn = document.createElement('button');
-      btn.style.cssText = 'display:block;width:100%;background:transparent;border:none;color:#ccc;padding:8px;text-align:left;cursor:pointer;border-radius:4px;';
+      btn.style.cssText =
+        'display:block;width:100%;background:transparent;border:none;color:#ccc;' +
+        'padding:8px 10px;text-align:left;cursor:pointer;border-radius:5px;font-size:0.9em;';
       btn.innerHTML = `${item.icon} ${item.label}`;
-      btn.addEventListener('mouseover', () => (btn.style.background = 'rgba(100,100,100,0.3)'));
-      btn.addEventListener('mouseout',  () => (btn.style.background = 'transparent'));
-      btn.addEventListener('click', () => { item.action(); menu.remove(); });
+      btn.onmouseover = () => { btn.style.background = 'rgba(100,100,100,0.3)'; };
+      btn.onmouseout  = () => { btn.style.background = 'transparent'; };
+      btn.onclick = () => { item.action(); menu.remove(); };
       menu.appendChild(btn);
     });
 
     document.body.appendChild(menu);
-    this.contextMenu = menu;
-    document.addEventListener('click', () => { if (this.contextMenu) this.contextMenu.remove(); });
-  },
 
-  _renameObject(obj) {
-    const newName = prompt('Novo nome:', obj.name);
-    if (newName) { Lighting.Model.updateObject(obj.id, { name: newName }); Lighting.Model._save(); this.refresh(); }
+    // Fecha ao clicar fora — com setTimeout para não capturar o clique que abriu
+    setTimeout(() => {
+      const close = e => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
+      document.addEventListener('mousedown', close);
+    }, 0);
   },
 };
 

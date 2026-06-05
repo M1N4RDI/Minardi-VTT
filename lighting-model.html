@@ -1,38 +1,35 @@
 <script>
 // lighting-model.html — Modelo unificado de iluminação
-// Todos os objetos (dark/light) usam a mesma estrutura
 console.log('lighting-model carregado');
 
 window.Lighting = window.Lighting || {};
+
 Lighting.Model = {
   gridSize: 50,
-  objects: [], // [{ id, name, shape, mode, locked, visible, ... }]
-  walls: [], // [{ id, p1, p2, locked, visible }]
+  objects: [],  // [{ id, name, shape, mode, locked, visible, ... }]
+  walls: [],    // [{ id, p1, p2, locked, visible }]
   _nextId: 1,
   masterReveal: false,
+  enabled: false,   // ← NOVO: iluminação desativada por padrão
 
-  // CRUD objeto genérico (dark/light/shape independente)
+  // CRUD objeto genérico
   addObject(props) {
     const id = this._nextId++;
     const obj = Object.assign({
       id,
       name: props.name || 'Objeto',
-      shape: props.shape || 'rect', // rect, circle, polygon
-      mode: props.mode || 'dark', // dark, light
+      shape: props.shape || 'rect',
+      mode: props.mode || 'dark',
       locked: false,
       visible: true,
       lightSource: props.lightSource || false,
-      // coordenadas dependem do shape
       x: props.x || 0,
       y: props.y || 0,
-      // rect/circle
-      width: props.width || 100,
+      width:  props.width  || 100,
       height: props.height || 100,
       radius: props.radius || 50,
-      // light properties (só para mode='light')
       luminosity: props.luminosity || 6,
-      penumbra: props.penumbra || 12,
-      // polygon
+      penumbra:   props.penumbra   || 12,
       points: props.points || [],
     }, props);
     this.objects.push(obj);
@@ -54,16 +51,10 @@ Lighting.Model = {
     return this.objects.find(o => o.id === id);
   },
 
-  // Paredes (geometria simples)
+  // Paredes
   addWall(p1, p2, opts = {}) {
     const id = this._nextId++;
-    const wall = Object.assign({
-      id,
-      p1,
-      p2,
-      locked: false,
-      visible: true,
-    }, opts);
+    const wall = Object.assign({ id, p1, p2, locked: false, visible: true }, opts);
     this.walls.push(wall);
     return wall;
   },
@@ -80,8 +71,7 @@ Lighting.Model = {
   toggleObjectMode(id) {
     const obj = this.getObject(id);
     if (!obj) return null;
-    const newMode = obj.mode === 'dark' ? 'light' : 'dark';
-    return this.updateObject(id, { mode: newMode });
+    return this.updateObject(id, { mode: obj.mode === 'dark' ? 'light' : 'dark' });
   },
 
   toggleObjectLocked(id) {
@@ -107,9 +97,10 @@ Lighting.Model = {
   _save() {
     try {
       const payload = JSON.stringify({
-        objects: this.objects,
-        walls: this.walls,
+        objects:      this.objects,
+        walls:        this.walls,
         masterReveal: this.masterReveal,
+        enabled:      this.enabled,
       });
       localStorage.setItem('lighting_state_v3', payload);
       try {
@@ -127,9 +118,10 @@ Lighting.Model = {
       const raw = localStorage.getItem('lighting_state_v3');
       if (!raw) return;
       const s = JSON.parse(raw);
-      this.objects = s.objects || [];
-      this.walls = s.walls || [];
+      this.objects      = s.objects      || [];
+      this.walls        = s.walls        || [];
       this.masterReveal = s.masterReveal || false;
+      this.enabled      = s.enabled      || false;  // ← restaura estado
     } catch (e) {
       console.warn('Lighting load failed', e);
     }
