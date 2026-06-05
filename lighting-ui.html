@@ -3,6 +3,7 @@
 console.log('lighting-ui carregado');
 
 window.Lighting = window.Lighting || {};
+
 Lighting.UI = {
   initialized: false,
   sidebar: null,
@@ -15,18 +16,12 @@ Lighting.UI = {
 
     setTimeout(() => {
       const sidebar = document.getElementById('sidebar');
-      if (!sidebar) {
-        setTimeout(() => this.init(), 200);
-        return;
-      }
-
+      if (!sidebar) { setTimeout(() => this.init(), 200); return; }
       this.sidebar = sidebar;
       this._createPanel();
-      
-      // force lighting mode
-      if (window.VTTMode && typeof VTTMode.set === 'function') {
-        VTTMode.set('lighting');
-      }
+
+      // *** CORREÇÃO: NÃO forçar VTTMode.set('lighting') aqui ***
+      // O modo só muda quando o usuário clicar no botão.
 
       Lighting.Input.init();
       Lighting.Render.init();
@@ -37,12 +32,25 @@ Lighting.UI = {
   _createPanel() {
     const cat = document.createElement('div');
     cat.className = 'category';
-    cat.id = 'lighting-panel';
+    cat.id = 'cat-lighting';   // ← ID para o VTTMode
 
     const title = document.createElement('div');
     title.className = 'category-title';
     title.innerText = 'Iluminação';
     cat.appendChild(title);
+
+    // ---- Botão de MODO ----
+    const modeBtn = document.createElement('button');
+    modeBtn.id = 'lighting-mode-btn';
+    modeBtn.className = 'mode-btn mode-lighting';
+    modeBtn.textContent = '🕯 ATIVAR ILUMINAÇÃO';
+    modeBtn.onclick = () => VTTMode.setMode('lighting');
+
+    // Registra no VTTMode
+    VTTMode._modeBtns.lighting  = modeBtn;
+    VTTMode._categoryIds.lighting = 'cat-lighting';
+
+    cat.appendChild(modeBtn);
 
     // FERRAMENTAS
     const toolsSection = document.createElement('div');
@@ -61,11 +69,11 @@ Lighting.UI = {
     toolGrid.style.gap = '6px';
 
     const tools = [
-      { id: 'select', icon: '🖱', title: 'Selecionar' },
-      { id: 'rect', icon: '⬜', title: 'Retângulo' },
-      { id: 'circle', icon: '⚪', title: 'Círculo' },
-      { id: 'polygon', icon: '⬡', title: 'Polígono' },
-      { id: 'wall', icon: '🚧', title: 'Parede' },
+      { id: 'select',  icon: '🖱',  title: 'Selecionar' },
+      { id: 'rect',    icon: '⬜', title: 'Retângulo' },
+      { id: 'circle',  icon: '⚪', title: 'Círculo' },
+      { id: 'polygon', icon: '⬡',  title: 'Polígono' },
+      { id: 'wall',    icon: '🚧', title: 'Parede' },
     ];
 
     tools.forEach((tool) => {
@@ -103,14 +111,7 @@ Lighting.UI = {
     actionsGrid.style.gap = '6px';
 
     const coverBtn = this._createActionButton('🌑 Cobrir Mapa', () => {
-      Lighting.Model.addObject({
-        name: 'Mapa Coberto',
-        shape: 'rect',
-        x: 0,
-        y: 0,
-        width: 99999,
-        height: 99999,
-      });
+      Lighting.Model.addObject({ name: 'Mapa Coberto', shape: 'rect', x: 0, y: 0, width: 99999, height: 99999 });
       Lighting.Model._save();
       this.refresh();
       Lighting.Render.draw();
@@ -144,12 +145,10 @@ Lighting.UI = {
     objectList.style.overflowY = 'auto';
     objectList.style.fontSize = '0.85em';
     listSection.appendChild(objectList);
-
     cat.appendChild(listSection);
 
     // PAINEL DE PROPRIEDADES
     const propsSection = document.createElement('div');
-
     const propsLabel = document.createElement('div');
     propsLabel.style.fontSize = '0.8em';
     propsLabel.style.fontWeight = 'bold';
@@ -161,10 +160,20 @@ Lighting.UI = {
     propPanel.id = 'lighting-props-panel';
     propPanel.style.fontSize = '0.85em';
     propsSection.appendChild(propPanel);
-
     cat.appendChild(propsSection);
 
     this.sidebar.appendChild(cat);
+
+    // Inicializa colapso para esta categoria
+    if (typeof initCollapseForCategory === 'function') {
+      initCollapseForCategory(cat);
+    }
+
+    // Notifica o VTTMode para reprocessar o estado atual
+    // (a categoria recém-criada precisa saber se está dimmed ou não)
+    setTimeout(() => {
+      if (window.VTTMode) VTTMode.setMode(VTTMode.active);
+    }, 100);
   },
 
   _createActionButton(label, action) {
@@ -200,20 +209,12 @@ Lighting.UI = {
     if (!listEl) return;
     listEl.innerHTML = '';
 
-    const darkObjs = Lighting.Model.objects.filter((o) => o.mode === 'dark');
+    const darkObjs  = Lighting.Model.objects.filter((o) => o.mode === 'dark');
     const lightObjs = Lighting.Model.objects.filter((o) => o.mode === 'light');
 
-    if (darkObjs.length > 0) {
-      this._createListGroup(listEl, '▼ Áreas Escuras', darkObjs);
-    }
-
-    if (lightObjs.length > 0) {
-      this._createListGroup(listEl, '▼ Áreas Iluminadas', lightObjs);
-    }
-
-    if (Lighting.Model.walls.length > 0) {
-      this._createWallGroup(listEl);
-    }
+    if (darkObjs.length  > 0) this._createListGroup(listEl, '▼ Áreas Escuras',    darkObjs);
+    if (lightObjs.length > 0) this._createListGroup(listEl, '▼ Áreas Iluminadas', lightObjs);
+    if (Lighting.Model.walls.length > 0) this._createWallGroup(listEl);
 
     if (!darkObjs.length && !lightObjs.length && !Lighting.Model.walls.length) {
       const empty = document.createElement('div');
@@ -298,71 +299,49 @@ Lighting.UI = {
     const obj = Lighting.Model.getObject(selectedId);
     if (!obj) return;
 
-    // Nome
     this._createPropField(propsEl, 'Nome', obj.name, (val) => {
       Lighting.Model.updateObject(obj.id, { name: val });
       Lighting.Model._save();
       this._renderObjectList();
     });
 
-    // Tipo
     const typeRow = document.createElement('div');
     typeRow.style.marginBottom = '8px';
-    const typeLabel = document.createElement('label');
-    typeLabel.innerText = 'Tipo';
-    typeRow.appendChild(typeLabel);
-    const typeDiv = document.createElement('div');
-    typeDiv.style.fontSize = '0.85em';
+    const typeLabel = document.createElement('label'); typeLabel.innerText = 'Tipo'; typeRow.appendChild(typeLabel);
+    const typeDiv = document.createElement('div'); typeDiv.style.fontSize = '0.85em';
     typeDiv.innerText = obj.mode === 'dark' ? 'Área Escura' : 'Área Iluminada';
-    typeRow.appendChild(typeDiv);
-    propsEl.appendChild(typeRow);
+    typeRow.appendChild(typeDiv); propsEl.appendChild(typeRow);
 
-    // Forma
     const shapeRow = document.createElement('div');
     shapeRow.style.marginBottom = '8px';
-    const shapeLabel = document.createElement('label');
-    shapeLabel.innerText = 'Forma';
-    shapeRow.appendChild(shapeLabel);
-    const shapeDiv = document.createElement('div');
-    shapeDiv.style.fontSize = '0.85em';
+    const shapeLabel = document.createElement('label'); shapeLabel.innerText = 'Forma'; shapeRow.appendChild(shapeLabel);
+    const shapeDiv = document.createElement('div'); shapeDiv.style.fontSize = '0.85em';
     const shapeNames = { rect: 'Retângulo', circle: 'Círculo', polygon: 'Polígono' };
     shapeDiv.innerText = shapeNames[obj.shape] || obj.shape;
-    shapeRow.appendChild(shapeDiv);
-    propsEl.appendChild(shapeRow);
+    shapeRow.appendChild(shapeDiv); propsEl.appendChild(shapeRow);
 
-    // Bloqueada
     const lockedRow = document.createElement('div');
     lockedRow.style.marginBottom = '8px';
-    const lockedLabel = document.createElement('label');
-    lockedLabel.innerText = 'Bloqueada';
-    lockedRow.appendChild(lockedLabel);
+    const lockedLabel = document.createElement('label'); lockedLabel.innerText = 'Bloqueada'; lockedRow.appendChild(lockedLabel);
     const lockedCheckbox = document.createElement('input');
-    lockedCheckbox.type = 'checkbox';
-    lockedCheckbox.checked = obj.locked;
+    lockedCheckbox.type = 'checkbox'; lockedCheckbox.checked = obj.locked;
     lockedCheckbox.addEventListener('change', () => {
       Lighting.Model.updateObject(obj.id, { locked: lockedCheckbox.checked });
-      Lighting.Model._save();
-      this.refresh();
+      Lighting.Model._save(); this.refresh();
     });
-    lockedRow.appendChild(lockedCheckbox);
-    propsEl.appendChild(lockedRow);
+    lockedRow.appendChild(lockedCheckbox); propsEl.appendChild(lockedRow);
 
-    // Propriedades específicas de LIGHT
     if (obj.mode === 'light') {
       this._createPropField(propsEl, 'Luminosidade (grid)', obj.luminosity || 6, (val) => {
         Lighting.Model.updateObject(obj.id, { luminosity: Number(val) || 1 });
-        Lighting.Model._save();
-        Lighting.Render.draw();
+        Lighting.Model._save(); Lighting.Render.draw();
       }, 'number');
-
       this._createPropField(propsEl, 'Penumbra (grid)', obj.penumbra || 12, (val) => {
         Lighting.Model.updateObject(obj.id, { penumbra: Number(val) || 0 });
-        Lighting.Model._save();
-        Lighting.Render.draw();
+        Lighting.Model._save(); Lighting.Render.draw();
       }, 'number');
     }
 
-    // Botões de ação
     const buttonRow = document.createElement('div');
     buttonRow.style.display = 'grid';
     buttonRow.style.gridTemplateColumns = '1fr 1fr';
@@ -370,40 +349,26 @@ Lighting.UI = {
     buttonRow.style.marginTop = '10px';
 
     const toggleBtn = document.createElement('button');
-    toggleBtn.className = 'btn-full';
-    toggleBtn.style.fontSize = '0.75em';
+    toggleBtn.className = 'btn-full'; toggleBtn.style.fontSize = '0.75em';
     toggleBtn.innerText = obj.mode === 'dark' ? 'Iluminar' : 'Escurecer';
     toggleBtn.addEventListener('click', () => {
-      Lighting.Model.toggleObjectMode(obj.id);
-      Lighting.Model._save();
-      this.refresh();
-      Lighting.Render.draw();
+      Lighting.Model.toggleObjectMode(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw();
     });
     buttonRow.appendChild(toggleBtn);
 
     const dupBtn = document.createElement('button');
-    dupBtn.className = 'btn-full';
-    dupBtn.style.fontSize = '0.75em';
-    dupBtn.innerText = 'Duplicar';
+    dupBtn.className = 'btn-full'; dupBtn.style.fontSize = '0.75em'; dupBtn.innerText = 'Duplicar';
     dupBtn.addEventListener('click', () => {
-      Lighting.Model.duplicateObject(obj.id);
-      Lighting.Model._save();
-      this.refresh();
-      Lighting.Render.draw();
+      Lighting.Model.duplicateObject(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw();
     });
     buttonRow.appendChild(dupBtn);
 
     const delBtn = document.createElement('button');
-    delBtn.className = 'btn-full';
-    delBtn.style.fontSize = '0.75em';
-    delBtn.style.gridColumn = '1 / -1';
+    delBtn.className = 'btn-full'; delBtn.style.fontSize = '0.75em'; delBtn.style.gridColumn = '1 / -1';
     delBtn.innerText = 'Excluir';
     delBtn.addEventListener('click', () => {
-      Lighting.Model.removeObject(obj.id);
-      Lighting.Model._save();
-      Lighting.Input.selectedObjectId = null;
-      this.refresh();
-      Lighting.Render.draw();
+      Lighting.Model.removeObject(obj.id); Lighting.Model._save();
+      Lighting.Input.selectedObjectId = null; this.refresh(); Lighting.Render.draw();
     });
     buttonRow.appendChild(delBtn);
 
@@ -411,93 +376,61 @@ Lighting.UI = {
   },
 
   _createPropField(parent, label, value, onChange, type = 'text') {
-    const row = document.createElement('div');
-    row.style.marginBottom = '8px';
-
-    const lbl = document.createElement('label');
-    lbl.innerText = label;
-    row.appendChild(lbl);
-
-    const input = document.createElement('input');
-    input.type = type;
-    input.value = value;
+    const row = document.createElement('div'); row.style.marginBottom = '8px';
+    const lbl = document.createElement('label'); lbl.innerText = label; row.appendChild(lbl);
+    const input = document.createElement('input'); input.type = type; input.value = value;
     input.addEventListener('change', (e) => onChange(e.target.value));
-    row.appendChild(input);
-
-    parent.appendChild(row);
+    row.appendChild(input); parent.appendChild(row);
   },
 
   showContextMenu(objId, pos) {
     const obj = Lighting.Model.getObject(objId);
     if (!obj) return;
-
     if (this.contextMenu) this.contextMenu.remove();
 
     const menu = document.createElement('div');
     menu.style.cssText = `
-      position: fixed;
-      left: ${pos.x}px;
-      top: ${pos.y}px;
-      background: rgba(30,30,30,0.95);
-      border: 1px solid rgba(200,200,200,0.3);
-      border-radius: 6px;
-      padding: 4px;
-      z-index: 10000;
-      font-size: 0.85em;
-      min-width: 180px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      position: fixed; left: ${pos.x}px; top: ${pos.y}px;
+      background: rgba(30,30,30,0.95); border: 1px solid rgba(200,200,200,0.3);
+      border-radius: 6px; padding: 4px; z-index: 10000; font-size: 0.85em;
+      min-width: 180px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     `;
 
     const items = [
-      { icon: '✏️', label: 'Renomear', action: () => this._renameObject(obj) },
-      { icon: obj.mode === 'dark' ? '💡' : '🌑', label: obj.mode === 'dark' ? 'Iluminar' : 'Escurecer', action: () => { Lighting.Model.toggleObjectMode(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); } },
-      { icon: obj.locked ? '🔓' : '🔒', label: obj.locked ? 'Desbloquear' : 'Bloquear', action: () => { Lighting.Model.toggleObjectLocked(obj.id); Lighting.Model._save(); this.refresh(); } },
-      { icon: '⧉', label: 'Duplicar', action: () => { Lighting.Model.duplicateObject(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); } },
-      { icon: '🗑', label: 'Excluir', action: () => { Lighting.Model.removeObject(obj.id); Lighting.Model._save(); Lighting.Input.selectedObjectId = null; this.refresh(); Lighting.Render.draw(); } },
+      { icon: '✏️', label: 'Renomear',
+        action: () => this._renameObject(obj) },
+      { icon: obj.mode === 'dark' ? '💡' : '🌑',
+        label: obj.mode === 'dark' ? 'Iluminar' : 'Escurecer',
+        action: () => { Lighting.Model.toggleObjectMode(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); } },
+      { icon: obj.locked ? '🔓' : '🔒',
+        label: obj.locked ? 'Desbloquear' : 'Bloquear',
+        action: () => { Lighting.Model.toggleObjectLocked(obj.id); Lighting.Model._save(); this.refresh(); } },
+      { icon: '⧉', label: 'Duplicar',
+        action: () => { Lighting.Model.duplicateObject(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); } },
+      { icon: '🗑', label: 'Excluir',
+        action: () => { Lighting.Model.removeObject(obj.id); Lighting.Model._save(); Lighting.Input.selectedObjectId = null; this.refresh(); Lighting.Render.draw(); } },
     ];
 
     items.forEach((item) => {
       const btn = document.createElement('button');
-      btn.style.cssText = `
-        display: block;
-        width: 100%;
-        background: transparent;
-        border: none;
-        color: #ccc;
-        padding: 8px;
-        text-align: left;
-        cursor: pointer;
-        border-radius: 4px;
-      `;
+      btn.style.cssText = 'display:block;width:100%;background:transparent;border:none;color:#ccc;padding:8px;text-align:left;cursor:pointer;border-radius:4px;';
       btn.innerHTML = `${item.icon} ${item.label}`;
       btn.addEventListener('mouseover', () => (btn.style.background = 'rgba(100,100,100,0.3)'));
-      btn.addEventListener('mouseout', () => (btn.style.background = 'transparent'));
-      btn.addEventListener('click', () => {
-        item.action();
-        menu.remove();
-      });
+      btn.addEventListener('mouseout',  () => (btn.style.background = 'transparent'));
+      btn.addEventListener('click', () => { item.action(); menu.remove(); });
       menu.appendChild(btn);
     });
 
     document.body.appendChild(menu);
     this.contextMenu = menu;
-
-    document.addEventListener('click', () => {
-      if (this.contextMenu) this.contextMenu.remove();
-    });
+    document.addEventListener('click', () => { if (this.contextMenu) this.contextMenu.remove(); });
   },
 
   _renameObject(obj) {
     const newName = prompt('Novo nome:', obj.name);
-    if (newName) {
-      Lighting.Model.updateObject(obj.id, { name: newName });
-      Lighting.Model._save();
-      this.refresh();
-    }
+    if (newName) { Lighting.Model.updateObject(obj.id, { name: newName }); Lighting.Model._save(); this.refresh(); }
   },
 };
 
-setTimeout(() => {
-  Lighting.UI.init();
-}, 700);
+setTimeout(() => { Lighting.UI.init(); }, 700);
 </script>

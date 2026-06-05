@@ -603,167 +603,169 @@ console.log("token-ui carregado");
     };
 
     // =============================================
-    // FUNÇÕES INTERNAS DA IIFE
-    // =============================================
+// TRECHO DE SUBSTITUIÇÃO em token-ui.html
+// Substitui APENAS a função injectTokenUI()
+// dentro da IIFE TOKEN_UI_BOOT
+// =============================================
 
-    function injectTokenUI() {
-        const sidebar = document.getElementById("sidebar");
-        if (!sidebar) return;
+function injectTokenUI() {
+  const sidebar = document.getElementById("sidebar");
+  if (!sidebar) return;
 
-        const category = document.createElement("div");
-        category.className = "category";
+  const category = document.createElement("div");
+  category.className = "category";
+  category.id = "cat-tokens";   // ← ID para o VTTMode
 
-        const title = document.createElement("div");
-        title.className = "category-title";
-        title.innerText = "Tokens";
-        category.appendChild(title);
+  const title = document.createElement("div");
+  title.className = "category-title";
+  title.innerText = "Tokens";
+  category.appendChild(title);
 
-        const group = document.createElement("div");
-        group.className = "control-group";
+  const group = document.createElement("div");
+  group.className = "control-group";
 
-        const btn = document.createElement("button");
-        btn.id = "token-toggle-btn";
-        btn.innerText = "🎲 ATIVAR TOKENS";
-        btn.style.cssText = "width:100%;padding:8px;margin-top:4px;border:1px solid #555;background:#2f2f2f;color:white;cursor:pointer;font-family:Cinzel,serif;letter-spacing:1px;transition:all 0.15s ease;";
+  // ---- Botão de MODO (substitui o toggle antigo) ----
+  const btn = document.createElement("button");
+  btn.id = "token-mode-btn";
+  btn.className = "mode-btn mode-tokens";
+  btn.textContent = "🎲 ATIVAR TOKENS";
 
-        btn.onclick = () => {
-            const canvas = TokenPlugin.Canvas.canvas;
-            if (!canvas) return;
+  btn.onclick = () => {
+    VTTMode.setMode("tokens");
+  };
 
-            if (VTTMode.is("tokens")) {
-                VTTMode.set("measure");
-                canvas.style.pointerEvents = "none";
-                btn.innerText = "🎲 ATIVAR TOKENS";
-                btn.style.background = "#2f2f2f";
-            } else {
-                VTTMode.set("tokens");
-                canvas.style.pointerEvents = "auto";
-                btn.innerText = "✅ TOKENS ATIVOS";
-                btn.style.background = "#3a7a3a";
-                TokenPlugin.Canvas.draw();
-            }
-        };
+  // Registra no VTTMode
+  VTTMode._modeBtns.tokens = btn;
+  VTTMode._categoryIds.tokens = "cat-tokens";
 
-        group.appendChild(btn);
+  group.appendChild(btn);
 
-        const folderInput = document.createElement("input");
-        folderInput.id = "token-folder-id";
-        folderInput.placeholder = "ID da pasta do Drive";
-        const savedTokenFolder = JSON.parse(localStorage.getItem('vtt_minardi_v1') || '{}').tokenFolderId || "";
-        folderInput.value = savedTokenFolder;
-        folderInput.style.cssText = "width:100%;margin-top:6px;padding:6px;background:#1a1a1a;color:white;border:1px solid #555;";
+  // ---- Pasta de tokens ----
+  const folderInput = document.createElement("input");
+  folderInput.id = "token-folder-id";
+  folderInput.placeholder = "ID da pasta do Drive";
+  const savedTokenFolder = JSON.parse(localStorage.getItem('vtt_minardi_v1') || '{}').tokenFolderId || "";
+  folderInput.value = savedTokenFolder;
+  folderInput.style.cssText = "width:100%;margin-top:6px;padding:6px;background:#1a1a1a;color:white;border:1px solid #555;";
 
-        const loadBtn = document.createElement("button");
-        loadBtn.innerText = "📂 Carregar Tokens";
-        loadBtn.style.cssText = "width:100%;margin-top:4px;padding:6px;background:#444;color:white;border:1px solid #555;cursor:pointer;";
+  const loadBtn = document.createElement("button");
+  loadBtn.innerText = "📂 Carregar Tokens";
+  loadBtn.style.cssText = "width:100%;margin-top:4px;padding:6px;background:#444;color:white;border:1px solid #555;cursor:pointer;";
 
-        const gallery = document.createElement("div");
-        gallery.style.cssText = "margin-top:6px;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-height:200px;overflow-y:auto;";
+  const gallery = document.createElement("div");
+  gallery.style.cssText = "margin-top:6px;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-height:200px;overflow-y:auto;";
 
-        loadBtn.onclick = () => {
-            const id = folderInput.value.trim();
-            if (!id) return alert("Informe o ID da pasta.");
-            google.script.run
-                .withSuccessHandler(files => {
-                    if (!files || !files.length) { alert("Nenhuma imagem encontrada."); return; }
-                    TokenPlugin.Model.setImageLibrary(files);
-                    renderGallery(files);
-                })
-                .getTokenImagesFromDrive(id);
-        };
+  loadBtn.onclick = () => {
+    const id = folderInput.value.trim();
+    if (!id) return alert("Informe o ID da pasta.");
+    google.script.run
+      .withSuccessHandler(files => {
+        if (!files || !files.length) { alert("Nenhuma imagem encontrada."); return; }
+        TokenPlugin.Model.setImageLibrary(files);
+        renderGallery(files);
+      })
+      .getTokenImagesFromDrive(id);
+  };
 
-        function renderGallery(files) {
-            gallery.innerHTML = "";
-            files.forEach(file => {
-                const img = document.createElement("img");
-                img.src = file.dataUrl;
-                img.style.cssText = "width:100%;cursor:pointer;border:2px solid transparent;border-radius:4px;";
-                img.draggable = true;
-                img.addEventListener("dragstart", (e) => {
-                    e.dataTransfer.setData("token-image", file.dataUrl);
-                });
-                img.onclick = () => {
-                    const selected = TokenPlugin.Model.getSelected()[0];
-                    if (!selected) { alert("Selecione um token primeiro."); return; }
-                    selected.appearance.image = file.dataUrl;
-                    TokenPlugin.Canvas.draw();
-                };
-                gallery.appendChild(img);
-            });
-        }
+  function renderGallery(files) {
+    gallery.innerHTML = "";
+    files.forEach(file => {
+      const img = document.createElement("img");
+      img.src = file.dataUrl;
+      img.style.cssText = "width:100%;cursor:pointer;border:2px solid transparent;border-radius:4px;";
+      img.draggable = true;
+      img.addEventListener("dragstart", (e) => { e.dataTransfer.setData("token-image", file.dataUrl); });
+      img.onclick = () => {
+        const selected = TokenPlugin.Model.getSelected()[0];
+        if (!selected) { alert("Selecione um token primeiro."); return; }
+        selected.appearance.image = file.dataUrl;
+        TokenPlugin.Canvas.draw();
+      };
+      gallery.appendChild(img);
+    });
+  }
 
-        group.appendChild(folderInput);
-        group.appendChild(loadBtn);
-        group.appendChild(gallery);
-        category.appendChild(group);
-        sidebar.appendChild(category);
+  group.appendChild(folderInput);
+  group.appendChild(loadBtn);
+  group.appendChild(gallery);
+  category.appendChild(group);
+  sidebar.appendChild(category);
 
-        // === SEÇÃO TRACKER ===
-        const trackerCategory = document.createElement("div");
-        trackerCategory.className = "category";
-        trackerCategory.id = "tracker-section";
-        trackerCategory.style.display = "none";
+  // Inicializa colapso para esta categoria
+  if (typeof initCollapseForCategory === 'function') {
+    initCollapseForCategory(category);
+  }
 
-        const trackerTitle = document.createElement("div");
-        trackerTitle.className = "category-title";
-        trackerTitle.innerText = "Ordem de Combate";
-        trackerCategory.appendChild(trackerTitle);
+  // === SEÇÃO TRACKER ===
+  const trackerCategory = document.createElement("div");
+  trackerCategory.className = "category";
+  trackerCategory.id = "tracker-section";
+  trackerCategory.style.display = "none";
 
-        const counter = document.createElement("div");
-        counter.id = "tracker-counter";
-        counter.style.cssText = "font-size:12px;color:#aaa;margin-bottom:8px;text-align:center;";
-        counter.innerText = "Sem combate ativo";
-        trackerCategory.appendChild(counter);
+  const trackerTitle = document.createElement("div");
+  trackerTitle.className = "category-title";
+  trackerTitle.innerText = "Ordem de Combate";
+  trackerCategory.appendChild(trackerTitle);
 
-        const controls = document.createElement("div");
-        controls.style.cssText = "display:flex;gap:4px;margin-bottom:8px;";
+  const counter = document.createElement("div");
+  counter.id = "tracker-counter";
+  counter.style.cssText = "font-size:12px;color:#aaa;margin-bottom:8px;text-align:center;";
+  counter.innerText = "Sem combate ativo";
+  trackerCategory.appendChild(counter);
 
-        const prevBtn = document.createElement("button");
-        prevBtn.innerText = "⏮";
-        prevBtn.style.cssText = "flex:1;padding:6px;background:#333;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:16px;";
-        prevBtn.onclick = () => TokenPlugin.Tracker.prev();
+  const controls = document.createElement("div");
+  controls.style.cssText = "display:flex;gap:4px;margin-bottom:8px;";
 
-        const playBtn = document.createElement("button");
-        playBtn.id = "tracker-play";
-        playBtn.innerText = "▶";
-        playBtn.style.cssText = "flex:1;padding:6px;background:#3a7a3a;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:16px;";
-        playBtn.onclick = () => {
-            if (TokenPlugin.Tracker.playing) TokenPlugin.Tracker.pause();
-            else TokenPlugin.Tracker.start();
-        };
+  const prevBtn = document.createElement("button");
+  prevBtn.innerText = "⏮";
+  prevBtn.style.cssText = "flex:1;padding:6px;background:#333;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:16px;";
+  prevBtn.onclick = () => TokenPlugin.Tracker.prev();
 
-        const nextBtn = document.createElement("button");
-        nextBtn.innerText = "⏭";
-        nextBtn.style.cssText = "flex:1;padding:6px;background:#333;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:16px;";
-        nextBtn.onclick = () => TokenPlugin.Tracker.next();
+  const playBtn = document.createElement("button");
+  playBtn.id = "tracker-play";
+  playBtn.innerText = "▶";
+  playBtn.style.cssText = "flex:1;padding:6px;background:#3a7a3a;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:16px;";
+  playBtn.onclick = () => {
+    if (TokenPlugin.Tracker.playing) TokenPlugin.Tracker.pause();
+    else TokenPlugin.Tracker.start();
+  };
 
-        const resetBtn = document.createElement("button");
-        resetBtn.innerText = "⏹";
-        resetBtn.style.cssText = "flex:1;padding:6px;background:#7a3a3a;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:16px;";
-        resetBtn.onclick = () => {
-            if (confirm("Zerar o combate? Os valores de iniciativa serão apagados.")) {
-                TokenPlugin.Tracker.reset();
-            }
-        };
+  const nextBtn = document.createElement("button");
+  nextBtn.innerText = "⏭";
+  nextBtn.style.cssText = "flex:1;padding:6px;background:#333;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:16px;";
+  nextBtn.onclick = () => TokenPlugin.Tracker.next();
 
-        controls.appendChild(prevBtn);
-        controls.appendChild(playBtn);
-        controls.appendChild(nextBtn);
-        controls.appendChild(resetBtn);
-        trackerCategory.appendChild(controls);
-
-        const listEl = document.createElement("div");
-        listEl.id = "tracker-list";
-        listEl.style.cssText = "display:flex;flex-direction:column;";
-        trackerCategory.appendChild(listEl);
-
-        sidebar.appendChild(trackerCategory);
-
-        setInterval(() => {
-            const visible = VTTMode?.is("tokens");
-            trackerCategory.style.display = visible ? "block" : "none";
-        }, 200);
+  const resetBtn = document.createElement("button");
+  resetBtn.innerText = "⏹";
+  resetBtn.style.cssText = "flex:1;padding:6px;background:#7a3a3a;color:white;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:16px;";
+  resetBtn.onclick = () => {
+    if (confirm("Zerar o combate? Os valores de iniciativa serão apagados.")) {
+      TokenPlugin.Tracker.reset();
     }
+  };
+
+  controls.appendChild(prevBtn);
+  controls.appendChild(playBtn);
+  controls.appendChild(nextBtn);
+  controls.appendChild(resetBtn);
+  trackerCategory.appendChild(controls);
+
+  const listEl = document.createElement("div");
+  listEl.id = "tracker-list";
+  listEl.style.cssText = "display:flex;flex-direction:column;";
+  trackerCategory.appendChild(listEl);
+  sidebar.appendChild(trackerCategory);
+
+  if (typeof initCollapseForCategory === 'function') {
+    initCollapseForCategory(trackerCategory);
+  }
+
+  setInterval(() => {
+    const visible = VTTMode?.is("tokens");
+    trackerCategory.style.display = visible ? "block" : "none";
+  }, 200);
+}
+
 
     function startTokenObserver() {
         if (tokenObserverInterval) return;
