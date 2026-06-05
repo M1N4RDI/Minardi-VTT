@@ -74,78 +74,228 @@ Lighting.Render = {
     this._spatialIndex = { root };
   },
 
-  draw() {
-    if (!this._canvas) { this.init(); return; }
-    const c   = this._canvas;
-    const ctx = this._ctx;
-    const W   = c.width;
-    const H   = c.height;
+window.LightPlugin = window.LightPlugin || {};
 
-    // *** CORREÇÃO PRINCIPAL: se não estiver habilitado, limpa e sai ***
-    if (!Lighting.Model.enabled) {
-      ctx.clearRect(0, 0, W, H);
+(function() {
+  LightPlugin.Render = LightPlugin.Render || {};
+
+  function obterCanvasIluminacao() {
+    return (
+      document.getElementById('lightingCanvas') ||
+      document.getElementById('lightCanvas') ||
+      document.getElementById('fogCanvas')
+    );
+  }
+
+  function obterObjetosIluminacao() {
+    if (LightPlugin.Model && typeof LightPlugin.Model.getObjects === 'function') {
+      return LightPlugin.Model.getObjects() || [];
+    }
+
+    if (Array.isArray(LightPlugin.objects)) {
+      return LightPlugin.objects;
+    }
+
+    if (Array.isArray(LightPlugin.lightingObjects)) {
+      return LightPlugin.lightingObjects;
+    }
+
+    return [];
+  }
+
+  function obterTamanhoGrid() {
+    return window.VTTGrid?.size || 50;
+  }
+
+  function desenharRetangulo(ctx, obj) {
+    var x = Number(obj.x || 0);
+    var y = Number(obj.y || 0);
+    var w = Number(obj.width || obj.w || 0);
+    var h = Number(obj.height || obj.h || 0);
+
+    ctx.fillRect(x, y, w, h);
+  }
+
+  function desenharCirculo(ctx, obj) {
+    var x = Number(obj.x || obj.cx || 0);
+    var y = Number(obj.y || obj.cy || 0);
+
+    var raio = Number(
+      obj.radius ||
+      obj.raio ||
+      obj.r ||
+      0
+    );
+
+    if (obj.radiusSquares || obj.raioQuadrados) {
+      raio = Number(obj.radiusSquares || obj.raioQuadrados) * obterTamanhoGrid();
+    }
+
+    ctx.beginPath();
+    ctx.arc(x, y, raio, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function desenharPoligono(ctx, obj) {
+    var pontos = obj.points || obj.pontos || [];
+
+    if (!Array.isArray(pontos) || pontos.length < 2) {
       return;
     }
 
-    // masterReveal: mestre vê tudo — overlay transparente (só paredes visíveis)
-    if (Lighting.Model.masterReveal) {
-      ctx.clearRect(0, 0, W, H);
-      this._drawWalls(ctx);
-      this._drawUI();
+    ctx.beginPath();
+    ctx.moveTo(Number(pontos[0].x || 0), Number(pontos[0].y || 0));
+
+    for (var i = 1; i < pontos.length; i++) {
+      ctx.lineTo(Number(pontos[i].x || 0), Number(pontos[i].y || 0));
+    }
+
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function desenharForma(ctx, obj) {
+    var tipo = obj.type || obj.tipo || obj.shape || obj.forma || 'rect';
+
+    if (tipo === 'circle' || tipo === 'circulo' || tipo === 'círculo') {
+      desenharCirculo(ctx, obj);
       return;
     }
 
-    // --- Pipeline normal ---
-    ctx.clearRect(0, 0, W, H);
+    if (tipo === 'polygon' || tipo === 'poligono' || tipo === 'polígono' || tipo === 'freehand' || tipo === 'maoLivre') {
+      desenharPoligono(ctx, obj);
+      return;
+    }
 
-    // 1. Fundo escuro sobre o mapa inteiro
-    ctx.fillStyle = 'rgba(0,0,0,0.88)';
-    ctx.fillRect(0, 0, W, H);
+    desenharRetangulo(ctx, obj);
+  }
 
-    // 2. Recortar áreas iluminadas (destination-out remove a escuridão)
-    Lighting.Model.objects.forEach(obj => {
-      if (!obj.visible) return;
-      if (obj.mode !== 'light') return;
+  function desenharLuz(ctx, obj) {
+    var x = Number(obj.x || obj.cx || 0);
+    var y = Number(obj.y || obj.cy || 0);
 
-      ctx.save();
+    var raio = Number(
+      obj.radius ||
+      obj.raio ||
+      obj.r ||
+      0
+    );
 
-      // Penumbra: cinza semitransparente levemente maior que a área iluminada
-      if (obj.shape === 'circle') {
-        const penPx = (obj.penumbra || 4) * (Lighting.Model.gridSize || 50);
-        const grad  = ctx.createRadialGradient(obj.x, obj.y, obj.radius, obj.x, obj.y, obj.radius + penPx);
-        grad.addColorStop(0,   'rgba(0,0,0,0.85)');
-        grad.addColorStop(1,   'rgba(0,0,0,0)');
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(obj.x, obj.y, obj.radius + penPx, 0, Math.PI * 2);
-        ctx.fill();
+    if (obj.radiusSquares || obj.raioQuadrados) {
+      raio = Number(obj.radiusSquares || obj.raioQuadrados) * obterTamanhoGrid();
+    }
+
+    if (!raio || raio <= 0) {
+      desenharForma(ctx, obj);
+      return;
+    }
+
+    var suavidade = Number(obj.softness || obj.suavidade || 0.35);
+    var inicioSuave = Math.max(0, Math.min(1, 1 - suavidade));
+
+    var gradiente = ctx.createRadialGradient(x, y, 0, x, y, raio);
+    gradiente.addColorStop(0, 'rgba(0, 0, 0, 1)');
+    gradiente.addColorStop(inicioSuave, 'rgba(0, 0, 0, 1)');
+    gradiente.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+    ctx.fillStyle = gradiente;
+    ctx.beginPath();
+    ctx.arc(x, y, raio, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  LightPlugin.Render.draw = function() {
+    var canvas = obterCanvasIluminacao();
+
+    if (!canvas) {
+      return;
+    }
+
+    var ctx = canvas.getContext('2d');
+
+    if (!ctx) {
+      return;
+    }
+
+    ctx.save();
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    var objetos = obterObjetosIluminacao();
+    var objetosSombra = [];
+    var objetosLuz = [];
+
+    for (var i = 0; i < objetos.length; i++) {
+      var obj = objetos[i];
+
+      if (!obj) {
+        continue;
       }
 
-      // Luz plena: recorte total
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.fillStyle = 'rgba(0,0,0,1)';
-      this._drawShape(ctx, obj);
-      ctx.fill();
+      var modo = obj.mode || obj.modo || obj.kind || obj.tipoIluminacao;
 
+      if (modo === 'dark' || modo === 'sombra' || modo === 'fog') {
+        objetosSombra.push(obj);
+        continue;
+      }
+
+      if (modo === 'light' || modo === 'luz') {
+        objetosLuz.push(obj);
+      }
+    }
+
+    /*
+      Regra essencial:
+      Se não existe nenhum objeto de sombra, o canvas de iluminação deve ficar transparente.
+      Isso remove a penumbra permanente indesejada.
+    */
+    if (objetosSombra.length === 0) {
       ctx.restore();
-    });
+      return;
+    }
 
-    // 3. Reaplica escuridão manual (áreas dark têm prioridade sobre luz)
-    Lighting.Model.objects.forEach(obj => {
-      if (!obj.visible || obj.mode !== 'dark') return;
-      ctx.save();
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = 'rgba(0,0,0,0.95)';
-      this._drawShape(ctx, obj);
-      ctx.fill();
-      ctx.restore();
-    });
+    /*
+      1. Primeiro desenha SOMBRAS.
+      A cobertura total é apenas mais um objeto dark.
+    */
+    ctx.globalCompositeOperation = 'source-over';
 
-    // 4. Paredes e UI
-    this._drawWalls(ctx);
-    this._drawUI();
-  },
+    for (var s = 0; s < objetosSombra.length; s++) {
+      var sombra = objetosSombra[s];
+      var opacidadeSombra = sombra.opacity;
+
+      if (opacidadeSombra === undefined || opacidadeSombra === null) {
+        opacidadeSombra = sombra.opacidade;
+      }
+
+      if (opacidadeSombra === undefined || opacidadeSombra === null) {
+        opacidadeSombra = 0.85;
+      }
+
+      ctx.fillStyle = 'rgba(0, 0, 0, ' + Number(opacidadeSombra) + ')';
+      desenharForma(ctx, sombra);
+    }
+
+    /*
+      2. Depois desenha LUZES como recorte.
+      A luz remove a sombra já existente.
+    */
+    ctx.globalCompositeOperation = 'destination-out';
+
+    for (var l = 0; l < objetosLuz.length; l++) {
+      desenharLuz(ctx, objetosLuz[l]);
+    }
+
+    /*
+      3. Sempre resetar a composição.
+      Se isso não for feito, outros desenhos do VTT podem ser afetados.
+    */
+    ctx.globalCompositeOperation = 'source-over';
+
+    ctx.restore();
+  };
+})();
 
   _drawWalls(ctx) {
     if (!Lighting.Model.walls || !Lighting.Model.walls.length) return;

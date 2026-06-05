@@ -113,13 +113,63 @@ Lighting.UI = {
     actionsLabel.innerText = 'Ações Rápidas';
     cat.appendChild(actionsLabel);
 
-    const coverBtn = this._createActionButton('🌑 Cobrir Mapa Todo', () => {
-      Lighting.Model.addObject({ name: 'Cobertura total', shape: 'rect', x: 0, y: 0, width: 99999, height: 99999, mode: 'dark' });
-      Lighting.Model._save();
-      this.refresh();
-      Lighting.Render.draw();
+window.LightPlugin = window.LightPlugin || {};
+
+(function() {
+  function atualizarTextoBotaoCoberturaTotal() {
+    var botao = document.getElementById('btnCoverMap') ||
+      document.getElementById('btnCobrirMapaTodo') ||
+      document.querySelector('[data-action="cover-map"]');
+
+    if (!botao) {
+      return;
+    }
+
+    var ativo = false;
+
+    if (LightPlugin.Model && typeof LightPlugin.Model.hasTotalCover === 'function') {
+      ativo = LightPlugin.Model.hasTotalCover();
+    }
+
+    botao.textContent = ativo ? 'Iluminar Mapa Todo' : 'Cobrir Mapa Todo';
+    botao.classList.toggle('active', ativo);
+    botao.classList.toggle('ativo', ativo);
+  }
+
+  function configurarBotaoCoberturaTotal() {
+    var botao = document.getElementById('btnCoverMap') ||
+      document.getElementById('btnCobrirMapaTodo') ||
+      document.querySelector('[data-action="cover-map"]');
+
+    if (!botao) {
+      return;
+    }
+
+    botao.addEventListener('click', function() {
+      if (!LightPlugin.Model || typeof LightPlugin.Model.toggleTotalCover !== 'function') {
+        console.warn('LightPlugin.Model.toggleTotalCover não está disponível.');
+        return;
+      }
+
+      LightPlugin.Model.toggleTotalCover();
+      atualizarTextoBotaoCoberturaTotal();
+
+      if (LightPlugin.Render && typeof LightPlugin.Render.draw === 'function') {
+        LightPlugin.Render.draw();
+      }
     });
-    cat.appendChild(coverBtn);
+
+    atualizarTextoBotaoCoberturaTotal();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', configurarBotaoCoberturaTotal);
+  } else {
+    configurarBotaoCoberturaTotal();
+  }
+
+  LightPlugin.updateTotalCoverButton = atualizarTextoBotaoCoberturaTotal;
+})();
 
     // ---- LISTA DE OBJETOS ----
     const listLabel = document.createElement('div');

@@ -93,25 +93,141 @@ Lighting.Model = {
     return copy;
   },
 
-  // Persistência
-  _save() {
-    try {
-      const payload = JSON.stringify({
-        objects:      this.objects,
-        walls:        this.walls,
-        masterReveal: this.masterReveal,
-        enabled:      this.enabled,
-      });
-      localStorage.setItem('lighting_state_v3', payload);
-      try {
-        if (window.google?.script?.run?.saveLightingState) {
-          google.script.run.withFailureHandler(() => {}).saveLightingState(payload);
-        }
-      } catch (e) {}
-    } catch (e) {
-      console.warn('Lighting save failed', e);
+window.LightPlugin = window.LightPlugin || {};
+
+(function() {
+  LightPlugin.Model = LightPlugin.Model || {};
+
+  function obterObjetos() {
+    if (typeof LightPlugin.Model.getObjects === 'function') {
+      return LightPlugin.Model.getObjects() || [];
     }
-  },
+
+    if (!Array.isArray(LightPlugin.objects)) {
+      LightPlugin.objects = [];
+    }
+
+    return LightPlugin.objects;
+  }
+
+  function salvarERedesenhar() {
+    if (typeof LightPlugin.Model._save === 'function') {
+      LightPlugin.Model._save();
+      return;
+    }
+
+    if (LightPlugin.Render && typeof LightPlugin.Render.draw === 'function') {
+      LightPlugin.Render.draw();
+    }
+  }
+
+  function criarIdCoberturaTotal() {
+    return 'lighting-total-cover';
+  }
+
+  function ehCoberturaTotal(obj) {
+    if (!obj) {
+      return false;
+    }
+
+    if (obj.id === criarIdCoberturaTotal()) {
+      return true;
+    }
+
+    if (obj.name === 'Cobertura total' || obj.nome === 'Cobertura total') {
+      return true;
+    }
+
+    return false;
+  }
+
+  LightPlugin.Model.hasTotalCover = function() {
+    var objetos = obterObjetos();
+
+    for (var i = 0; i < objetos.length; i++) {
+      if (ehCoberturaTotal(objetos[i])) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  LightPlugin.Model.removeTotalCover = function() {
+    var objetos = obterObjetos();
+
+    for (var i = objetos.length - 1; i >= 0; i--) {
+      if (ehCoberturaTotal(objetos[i])) {
+        objetos.splice(i, 1);
+      }
+    }
+
+    salvarERedesenhar();
+  };
+
+  LightPlugin.Model.addTotalCover = function() {
+    var objetos = obterObjetos();
+
+    if (LightPlugin.Model.hasTotalCover()) {
+      return;
+    }
+
+    objetos.push({
+      id: criarIdCoberturaTotal(),
+      name: 'Cobertura total',
+      nome: 'Cobertura total',
+      mode: 'dark',
+      modo: 'sombra',
+      type: 'rect',
+      tipo: 'retangulo',
+      x: -50000,
+      y: -50000,
+      width: 100000,
+      height: 100000,
+      opacity: 0.85,
+      opacidade: 0.85,
+      locked: true,
+      travado: true,
+      system: true,
+      sistema: true
+    });
+
+    salvarERedesenhar();
+  };
+
+  LightPlugin.Model.toggleTotalCover = function() {
+    if (LightPlugin.Model.hasTotalCover()) {
+      LightPlugin.Model.removeTotalCover();
+      return false;
+    }
+
+    LightPlugin.Model.addTotalCover();
+    return true;
+  };
+})();
+
+  // Persistência
+  window.LightPlugin = window.LightPlugin || {};
+
+(function() {
+  LightPlugin.Model = LightPlugin.Model || {};
+
+  LightPlugin.Model._save = function() {
+    /*
+      Iluminação é estado de sessão no cliente.
+      Não chamar Código.js aqui.
+
+      Motivo:
+      - Código.js não deve participar do estado visual temporário.
+      - google.script.run é assíncrono e pode redesenhar com estado atrasado.
+      - Isso causava fantasmas visuais ao criar/remover luz e sombra.
+    */
+
+    if (LightPlugin.Render && typeof LightPlugin.Render.draw === 'function') {
+      LightPlugin.Render.draw();
+    }
+  };
+})();
 
   _load() {
     try {
