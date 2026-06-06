@@ -1,18 +1,26 @@
 <script>
-// lighting-input.html — InputManager centralizado para Lighting
+// lighting-input.html — InputManager com resize por alças e rotação
 console.log('lighting-input carregado');
 
 window.Lighting = window.Lighting || {};
 
 Lighting.Input = {
-  initialized: false,
-  canvas: null,
-  activeTool: 'select',
+  initialized:      false,
+  canvas:           null,
+  activeTool:       'select',
   selectedObjectId: null,
-  draggingId: null,
-  dragOffset: null,
-  toolState: {},
-  _contextMenuEl: null,
+  toolState:        {},
+
+  // Estado de drag ativo
+  _drag: null,
+  // _drag = {
+  //   type: 'move' | 'handle' | 'rotate',
+  //   objId,
+  //   handleId?,         // para type=handle
+  //   startPoint,        // posição inicial do mouse
+  //   startObj,          // snapshot do objeto no início do drag
+  //   startAngle?,       // para rotação
+  // }
 
   init() {
     if (this.initialized) return;
@@ -26,21 +34,18 @@ Lighting.Input = {
       if (!canvas) {
         canvas = document.createElement('canvas');
         canvas.id = 'lighting-interaction-canvas';
-        // pointer-events:none por padrão — ativado só no modo lighting
         canvas.style.cssText =
           'position:absolute;top:0;left:0;width:100%;height:100%;z-index:1002;' +
-          'pointer-events:none;background:transparent;cursor:crosshair;';
+          'pointer-events:none;background:transparent;cursor:default;';
         map.appendChild(canvas);
       }
-
       this.canvas = canvas;
       this._syncCanvas();
       this._attachEvents();
 
-      window.addEventListener('resize', () => this._syncCanvas());
-
       const ro = new ResizeObserver(() => this._syncCanvas());
       ro.observe(map);
+      window.addEventListener('resize', () => this._syncCanvas());
     }, 300);
   },
 
@@ -48,163 +53,276 @@ Lighting.Input = {
     if (!this.canvas) return;
     const map = document.getElementById('map-container');
     if (!map) return;
-    // Usa as dimensões reais do container, não do viewport
     this.canvas.width  = map.offsetWidth  || map.clientWidth  || 800;
     this.canvas.height = map.offsetHeight || map.clientHeight || 600;
   },
 
   _attachEvents() {
-    if (!this.canvas) return;
-    this.canvas.addEventListener('mousedown',   e => this._onMouseDown(e));
-    this.canvas.addEventListener('mousemove',   e => this._onMouseMove(e));
-    this.canvas.addEventListener('mouseup',     e => this._onMouseUp(e));
-    this.canvas.addEventListener('dblclick',    e => this._onDoubleClick(e));
-    this.canvas.addEventListener('contextmenu', e => this._onContextMenu(e));
+    this.canvas.addEventListener('mousedown',   e => this._onDown(e));
+    this.canvas.addEventListener('mousemove',   e => this._onMove(e));
+    this.canvas.addEventListener('mouseup',     e => this._onUp(e));
+    this.canvas.addEventListener('dblclick',    e => this._onDbl(e));
+    this.canvas.addEventListener('contextmenu', e => this._onCtx(e));
   },
 
   setActiveTool(tool) {
     this.activeTool = tool;
     this.toolState  = {};
-    if (this.canvas) {
-      this.canvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
-    }
+    this._drag      = null;
+    this.canvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
   },
 
-  // *** CORREÇÃO CRÍTICA: usa offsetX/offsetY que já são relativos ao canvas ***
-  _getPoint(e) {
-    return { x: e.offsetX, y: e.offsetY };
-  },
+  _pt(e) { return { x: e.offsetX, y: e.offsetY }; },
 
-  _onMouseDown(e) {
+  // ── Mouse Down ───────────────────────────────────────────────
+  _onDown(e) {
     if (!window.VTTMode || !VTTMode.is('lighting')) return;
-    if (e.button !== 0) return;  // ignora botão direito aqui
+    if (e.button !== 0) return;
 
-    const point = this._getPoint(e);
+    const pt = this._pt(e);
 
+    // ─ Ferramenta select: testar alças → rotação → objeto ─
     if (this.activeTool === 'select') {
-      const hit = this._hitTest(point);
+      // 1. Alça de rotação
+      if (this.selectedObjectId) {
+        const obj = Lighting.Model.getObject(this.selectedObjectId);
+        if (obj && !obj.locked && obj.shape === 'rect') {
+          const rh = Lighting.Render.getRotateHandlePos(obj);
+          if (rh && Math.hypot(pt.x - rh.x, pt.y - rh.y) <= 10) {
+            const rcx = obj.x + (obj.width  || 100) / 2;
+            const rcy = obj.y + (obj.height || 100) / 2;
+            this._drag = {
+              type: 'rotate',
+              objId: obj.id,
+              startPoint: pt,
+              startObj:   { ...obj },
+              startAngle: Math.atan2(pt.y - rcy, pt.x - rcx) * 180 / Math.PI,
+              cx: rcx, cy: rcy,
+            };
+            this.canvas.style.cursor = 'grabbing';
+            return;
+          }
+        }
+      }
+
+      // 2. Alça de resize
+      if (this.selectedObjectId) {
+        const obj = Lighting.Model.getObject(this.selectedObjectId);
+        if (obj && !obj.locked) {
+          const handles = Lighting.Render.getHandles(obj);
+          for (const h of handles) {
+            if (Math.hypot(pt.x - h.x, pt.y - h.y) <= 10) {
+              this._drag = {
+                type: 'handle',
+                objId: obj.id,
+                handleId: h.handleId,
+                startPoint: pt,
+                startObj: { ...obj },
+              };
+              this.canvas.style.cursor = h.cursor;
+              return;
+            }
+          }
+        }
+      }
+
+      // 3. Hit-test objeto
+      const hit = this._hitTest(pt);
       if (hit) {
         this.selectedObjectId = hit;
-        this.draggingId       = hit;
         const obj = Lighting.Model.getObject(hit);
         if (obj && !obj.locked) {
-          this.dragOffset = { x: obj.x - point.x, y: obj.y - point.y };
+          this._drag = {
+            type: 'move',
+            objId: hit,
+            startPoint: pt,
+            startObj: { ...obj },
+          };
+          this.canvas.style.cursor = 'grabbing';
         }
       } else {
         this.selectedObjectId = null;
-        this.draggingId       = null;
+        this._drag = null;
       }
+
       Lighting.Render.draw();
       return;
     }
 
+    // ─ Ferramenta rect ─────────────────────────────────────────
     if (this.activeTool === 'rect') {
-      this.toolState = { start: point };
+      this.toolState = { start: pt };
       return;
     }
 
+    // ─ Ferramenta circle ───────────────────────────────────────
     if (this.activeTool === 'circle') {
-      this.toolState = { start: point };
+      this.toolState = { start: pt };
       return;
     }
 
+    // ─ Ferramenta polygon ──────────────────────────────────────
     if (this.activeTool === 'polygon') {
       if (!this.toolState.points) this.toolState.points = [];
-      this.toolState.points.push({ ...point });
+      this.toolState.points.push({ ...pt });
       Lighting.Render.draw();
       return;
     }
 
+    // ─ Ferramenta wall ─────────────────────────────────────────
     if (this.activeTool === 'wall') {
       if (!this.toolState.p1) {
-        this.toolState.p1 = point;
+        this.toolState.p1 = pt;
       } else {
-        Lighting.Model.addWall({ ...this.toolState.p1 }, { ...point });
+        Lighting.Model.addWall({ ...this.toolState.p1 }, { ...pt });
         Lighting.Model._save();
         Lighting.Render.buildSpatialIndex();
         Lighting.Render.draw();
         this.setActiveTool('select');
         if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
       }
-      return;
     }
   },
 
-  _onMouseMove(e) {
+  // ── Mouse Move ───────────────────────────────────────────────
+  _onMove(e) {
     if (!window.VTTMode || !VTTMode.is('lighting')) return;
-    const point = this._getPoint(e);
+    const pt = this._pt(e);
 
-    if (this.activeTool === 'select' && this.draggingId && this.dragOffset) {
-      const obj = Lighting.Model.getObject(this.draggingId);
-      if (obj && !obj.locked) {
-        Lighting.Model.updateObject(this.draggingId, {
-          x: point.x + this.dragOffset.x,
-          y: point.y + this.dragOffset.y,
-        });
-        Lighting.Render.draw();
+    // Drag ativo
+    if (this._drag) {
+      const obj = Lighting.Model.getObject(this._drag.objId);
+      if (!obj) { this._drag = null; return; }
+
+      const dx = pt.x - this._drag.startPoint.x;
+      const dy = pt.y - this._drag.startPoint.y;
+      const s  = this._drag.startObj;
+
+      if (this._drag.type === 'move') {
+        Lighting.Model.updateObject(obj.id, { x: s.x + dx, y: s.y + dy });
+
+      } else if (this._drag.type === 'rotate') {
+        const angle = Math.atan2(pt.y - this._drag.cy, pt.x - this._drag.cx) * 180 / Math.PI;
+        const delta = angle - this._drag.startAngle;
+        Lighting.Model.updateObject(obj.id, { rotation: ((s.rotation || 0) + delta + 360) % 360 });
+
+      } else if (this._drag.type === 'handle') {
+        this._applyHandle(obj, this._drag.handleId, pt, s);
       }
+
+      Lighting.Render.draw();
       return;
     }
 
-    // Preview em tempo real para qualquer ferramenta ativa
-    const hasActiveState =
-      (this.activeTool === 'rect'    && this.toolState.start)   ||
-      (this.activeTool === 'circle'  && this.toolState.start)   ||
-      (this.activeTool === 'wall'    && this.toolState.p1)      ||
+    // Sem drag: atualiza cursor e preview
+    if (this.activeTool === 'select' && this.selectedObjectId) {
+      const obj = Lighting.Model.getObject(this.selectedObjectId);
+      if (obj && !obj.locked) {
+        // Alça de rotação
+        if (obj.shape === 'rect') {
+          const rh = Lighting.Render.getRotateHandlePos(obj);
+          if (rh && Math.hypot(pt.x - rh.x, pt.y - rh.y) <= 10) {
+            this.canvas.style.cursor = 'grab';
+            return;
+          }
+        }
+        // Alças de resize
+        const handles = Lighting.Render.getHandles(obj);
+        for (const h of handles) {
+          if (Math.hypot(pt.x - h.x, pt.y - h.y) <= 10) {
+            this.canvas.style.cursor = h.cursor;
+            return;
+          }
+        }
+        this.canvas.style.cursor = 'grab';
+        return;
+      }
+    }
+
+    // Preview de ferramenta em andamento
+    const hasState =
+      (this.activeTool === 'rect'    && this.toolState.start)  ||
+      (this.activeTool === 'circle'  && this.toolState.start)  ||
+      (this.activeTool === 'wall'    && this.toolState.p1)     ||
       (this.activeTool === 'polygon' && this.toolState.points);
 
-    if (hasActiveState) {
-      this.toolState.current = point;
+    if (hasState) {
+      this.toolState.current = pt;
       Lighting.Render.draw();
     }
+
+    this.canvas.style.cursor = this.activeTool === 'select' ? 'default' : 'crosshair';
   },
 
-  _onMouseUp(e) {
+  // ── Mouse Up ─────────────────────────────────────────────────
+  _onUp(e) {
     if (!window.VTTMode || !VTTMode.is('lighting')) return;
-    const point = this._getPoint(e);
+    const pt = this._pt(e);
 
-    if (this.activeTool === 'rect' && this.toolState.start) {
-      const x1 = Math.min(this.toolState.start.x, point.x);
-      const y1 = Math.min(this.toolState.start.y, point.y);
-      const w  = Math.abs(point.x - this.toolState.start.x);
-      const h  = Math.abs(point.y - this.toolState.start.y);
-      if (w > 5 && h > 5) {
-        Lighting.Model.addObject({ name: 'Retângulo', shape: 'rect', x: x1, y: y1, width: w, height: h });
-        Lighting.Model._save();
-        if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
-      }
-      this.toolState = {};
-      this.setActiveTool('select');
-      Lighting.Render.draw();
-      return;
-    }
-
-    if (this.activeTool === 'circle' && this.toolState.start) {
-      const dx = point.x - this.toolState.start.x;
-      const dy = point.y - this.toolState.start.y;
-      const r  = Math.sqrt(dx * dx + dy * dy);
-      if (r > 5) {
-        Lighting.Model.addObject({
-          name: 'Círculo', shape: 'circle',
-          x: this.toolState.start.x, y: this.toolState.start.y, radius: r,
-        });
-        Lighting.Model._save();
-        if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
-      }
-      this.toolState = {};
-      this.setActiveTool('select');
-      Lighting.Render.draw();
-      return;
-    }
-
-    if (this.activeTool === 'select' && this.draggingId) {
-      this.draggingId = null;
-      this.dragOffset = null;
+    // Finaliza drag
+    if (this._drag) {
       Lighting.Model._save();
+      if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
+      this._drag = null;
+      this.canvas.style.cursor = 'default';
+      Lighting.Render.draw();
+      return;
+    }
+
+    // ─ rect ─
+    if (this.activeTool === 'rect' && this.toolState.start) {
+      const x1 = Math.min(this.toolState.start.x, pt.x);
+      const y1 = Math.min(this.toolState.start.y, pt.y);
+      const w  = Math.abs(pt.x - this.toolState.start.x);
+      const h  = Math.abs(pt.y - this.toolState.start.y);
+      if (w > 5 && h > 5) {
+        const obj = Lighting.Model.addObject({
+          name: 'Retângulo', shape: 'rect',
+          x: x1, y: y1, width: w, height: h, rotation: 0,
+        });
+        this.selectedObjectId = obj.id;
+        Lighting.Model._save();
+        if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
+      }
+      this.toolState = {};
+      this.setActiveTool('select');
+      Lighting.Render.draw();
+      return;
+    }
+
+    // ─ circle ─
+    if (this.activeTool === 'circle' && this.toolState.start) {
+      const dx = pt.x - this.toolState.start.x;
+      const dy = pt.y - this.toolState.start.y;
+      const r  = Math.sqrt(dx * dx + dy * dy);
+      const gs = window.VTTGrid?.size || 50;
+
+      if (r > 5) {
+        // Converte raio em pixels para diâmetro em células de grid
+        const lightDiam  = Math.max(1, Math.round((r / gs) * 2 * 10) / 10);
+        const penumDiam  = lightDiam * 2;   // padrão: dobro da luz
+        const obj = Lighting.Model.addObject({
+          name:             'Fonte de Luz',
+          shape:            'circle',
+          mode:             'light',         // círculos são luz por padrão
+          x:                this.toolState.start.x,
+          y:                this.toolState.start.y,
+          lightDiameter:    lightDiam,
+          penumbraDiameter: penumDiam,
+        });
+        this.selectedObjectId = obj.id;
+        Lighting.Model._save();
+        if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
+      }
+      this.toolState = {};
+      this.setActiveTool('select');
+      Lighting.Render.draw();
+      return;
     }
   },
 
-  _onDoubleClick(e) {
+  // ── Duplo clique: fecha polígono ─────────────────────────────
+  _onDbl(e) {
     if (!window.VTTMode || !VTTMode.is('lighting')) return;
     if (this.activeTool === 'polygon' && this.toolState.points && this.toolState.points.length >= 3) {
       Lighting.Model.addObject({
@@ -219,78 +337,110 @@ Lighting.Input = {
     }
   },
 
-  _onContextMenu(e) {
+  // ── Context menu ─────────────────────────────────────────────
+  _onCtx(e) {
     if (!window.VTTMode || !VTTMode.is('lighting')) return;
     e.preventDefault();
-    e.stopPropagation();   // ← impede propagação para document que removeria o menu
-
-    const point = this._getPoint(e);
-    const hit   = this._hitTest(point);
-
+    e.stopPropagation();
+    const pt  = this._pt(e);
+    const hit = this._hitTest(pt);
     if (hit) {
       this.selectedObjectId = hit;
       Lighting.Render.draw();
-      // Pequeno delay para garantir que o 'click' do document não captura este evento
       setTimeout(() => {
-        if (window.Lighting && Lighting.UI) {
+        if (window.Lighting && Lighting.UI)
           Lighting.UI.showContextMenu(hit, { x: e.clientX, y: e.clientY });
-        }
       }, 0);
     }
   },
 
-  _hitTest(point) {
-    // Raio de hit proporcional mas razoável: 8px fixos
+  // ── Aplicar alça de resize ───────────────────────────────────
+  _applyHandle(obj, handleId, pt, s) {
+    const gs = window.VTTGrid?.size || 50;
+
+    if (obj.shape === 'rect') {
+      let { x, y, width: w, height: h } = s;
+      const r = s.rotation || 0;
+
+      // Para rect sem rotação: redimensionamento direto
+      // Para rect com rotação: projeta no espaço local (simplificado para rotações pequenas)
+      if (handleId === 'tl') { const nw = (x+w) - pt.x; const nh = (y+h) - pt.y; if(nw>10&&nh>10){x=pt.x;y=pt.y;w=nw;h=nh;} }
+      if (handleId === 'tr') { const nw = pt.x - x; const nh = (y+h) - pt.y; if(nw>10&&nh>10){y=pt.y;w=nw;h=nh;} }
+      if (handleId === 'bl') { const nw = (x+w) - pt.x; const nh = pt.y - y; if(nw>10&&nh>10){x=pt.x;w=nw;h=nh;} }
+      if (handleId === 'br') { const nw = pt.x - x; const nh = pt.y - y; if(nw>10&&nh>10){w=nw;h=nh;} }
+      if (handleId === 'tm') { const nh = (y+h) - pt.y; if(nh>10){y=pt.y;h=nh;} }
+      if (handleId === 'bm') { const nh = pt.y - y; if(nh>10) h=nh; }
+      if (handleId === 'ml') { const nw = (x+w) - pt.x; if(nw>10){x=pt.x;w=nw;} }
+      if (handleId === 'mr') { const nw = pt.x - x; if(nw>10) w=nw; }
+      Lighting.Model.updateObject(obj.id, { x, y, width: w, height: h });
+
+    } else if (obj.shape === 'circle') {
+      // Alça de raio de luz
+      if (handleId === 'light-r') {
+        const dist = Math.abs(pt.x - s.x);
+        const diam = Math.max(0.5, Math.round((dist / gs) * 2 * 10) / 10);
+        Lighting.Model.updateObject(obj.id, { lightDiameter: diam });
+      }
+      // Alça de raio de penumbra
+      if (handleId === 'penum-r') {
+        const dist = Math.abs(pt.x - s.x);
+        const diam = Math.max(0.5, Math.round((dist / gs) * 2 * 10) / 10);
+        Lighting.Model.updateObject(obj.id, { penumbraDiameter: diam });
+      }
+      // Alça de mover (centro)
+      if (handleId === 'center') {
+        const dx = pt.x - this._drag.startPoint.x;
+        const dy = pt.y - this._drag.startPoint.y;
+        Lighting.Model.updateObject(obj.id, { x: s.x + dx, y: s.y + dy });
+      }
+    }
+  },
+
+  // ── Hit test ─────────────────────────────────────────────────
+  _hitTest(pt) {
+    const gs   = window.VTTGrid?.size || 50;
     const hitR = 8;
 
+    // Itera de trás para frente (objeto mais recente = topo)
     for (let i = Lighting.Model.objects.length - 1; i >= 0; i--) {
       const obj = Lighting.Model.objects[i];
-      if (!obj.visible) continue;
+      if (!obj.visible || obj._totalCover) continue;
 
       if (obj.shape === 'circle') {
-        const dist = Math.hypot(obj.x - point.x, obj.y - point.y);
-        // Acerta dentro do círculo OU na borda (±hitR)
-        if (dist <= obj.radius + hitR) return obj.id;
+        const lightR = ((obj.lightDiameter || 6) / 2) * gs;
+        const penumR = ((obj.penumbraDiameter || 12) / 2) * gs;
+        const dist   = Math.hypot(pt.x - obj.x, pt.y - obj.y);
+        if (dist <= penumR + hitR) return obj.id;
 
       } else if (obj.shape === 'rect') {
-        if (point.x >= obj.x - hitR && point.x <= obj.x + obj.width  + hitR &&
-            point.y >= obj.y - hitR && point.y <= obj.y + obj.height + hitR) {
+        // Considera rotação
+        let lx = pt.x, ly = pt.y;
+        if (obj.rotation) {
+          const rot = -(obj.rotation || 0) * Math.PI / 180;
+          const cx  = obj.x + (obj.width  || 100) / 2;
+          const cy  = obj.y + (obj.height || 100) / 2;
+          const dx  = pt.x - cx, dy = pt.y - cy;
+          lx = cx + dx * Math.cos(rot) - dy * Math.sin(rot);
+          ly = cy + dx * Math.sin(rot) + dy * Math.cos(rot);
+        }
+        if (lx >= obj.x - hitR && lx <= obj.x + (obj.width  || 100) + hitR &&
+            ly >= obj.y - hitR && ly <= obj.y + (obj.height || 100) + hitR) {
           return obj.id;
         }
 
-      } else if (obj.shape === 'polygon' && obj.points && obj.points.length > 0) {
-        if (this._pointInPolygon(point, obj.points)) return obj.id;
+      } else if (obj.shape === 'polygon' && obj.points && obj.points.length >= 3) {
+        if (this._pip(pt, obj.points)) return obj.id;
       }
-    }
-
-    // Verifica paredes (linha) — hit em 6px de distância
-    for (let i = Lighting.Model.walls.length - 1; i >= 0; i--) {
-      const w = Lighting.Model.walls[i];
-      if (!w.visible || !w.p1 || !w.p2) continue;
-      if (this._distToSegment(point, w.p1, w.p2) < 6) return w.id;
     }
 
     return null;
   },
 
-  _distToSegment(p, a, b) {
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const lenSq = dx * dx + dy * dy;
-    if (lenSq === 0) return Math.hypot(p.x - a.x, p.y - a.y);
-    let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
-    t = Math.max(0, Math.min(1, t));
-    return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
-  },
-
-  _pointInPolygon(point, polygon) {
+  _pip(pt, poly) {
     let inside = false;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      const xi = polygon[i].x, yi = polygon[i].y;
-      const xj = polygon[j].x, yj = polygon[j].y;
-      if ((yi > point.y) !== (yj > point.y) &&
-          point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi) {
-        inside = !inside;
-      }
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+      if ((yi > pt.y) !== (yj > pt.y) && pt.x < ((xj-xi)*(pt.y-yi))/(yj-yi)+xi) inside = !inside;
     }
     return inside;
   },
