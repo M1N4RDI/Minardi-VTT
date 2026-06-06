@@ -5,9 +5,9 @@ console.log('lighting-render carregado');
 window.Lighting = window.Lighting || {};
 
 Lighting.Render = {
-  _canvas: null,   // canvas visível (overlay sobre o mapa)
+  _canvas: null,
   _ctx:    null,
-  _off:    null,   // canvas offscreen para composição
+  _off:    null,
   _offCtx: null,
 
   init() {
@@ -26,8 +26,6 @@ Lighting.Render = {
     }
     this._canvas = c;
     this._ctx    = c.getContext('2d');
-
-    // Canvas offscreen para composição sem vazar transparência
     this._off    = document.createElement('canvas');
     this._offCtx = this._off.getContext('2d');
 
@@ -43,8 +41,8 @@ Lighting.Render = {
     const w = map.offsetWidth  || map.clientWidth  || 800;
     const h = map.offsetHeight || map.clientHeight || 600;
     if (this._canvas.width !== w || this._canvas.height !== h) {
-      this._canvas.width = w;  this._canvas.height = h;
-      this._off.width    = w;  this._off.height    = h;
+      this._canvas.width = w; this._canvas.height = h;
+      this._off.width    = w; this._off.height    = h;
     }
     this.draw();
   },
@@ -58,12 +56,9 @@ Lighting.Render = {
     const W   = this._canvas.width;
     const H   = this._canvas.height;
 
-    // Sempre começa limpo
     ctx.clearRect(0, 0, W, H);
-
     if (!Lighting.Model.enabled) return;
 
-    // masterReveal: overlay levíssimo + paredes
     if (Lighting.Model.masterReveal) {
       ctx.fillStyle = 'rgba(0,0,0,0.12)';
       ctx.fillRect(0, 0, W, H);
@@ -75,7 +70,7 @@ Lighting.Render = {
     const darkObjs  = Lighting.Model.objects.filter(o => o.visible && o.mode === 'dark');
     const lightObjs = Lighting.Model.objects.filter(o => o.visible && o.mode === 'light');
 
-    // Se não há escuridão: canvas limpo (mapa totalmente visível)
+    // Se não há objetos de escuridão: mapa totalmente visível
     if (darkObjs.length === 0) {
       this._drawWalls(ctx);
       this._drawUI();
@@ -83,86 +78,88 @@ Lighting.Render = {
     }
 
     // ── Pipeline offscreen ──────────────────────────────────────
-    // O segredo: compor no offscreen e copiar para o visível.
-    // Assim o destination-out nunca toca o canvas visível diretamente.
-
+    // Garante sombra 100% opaca e luz recortando corretamente
     const off    = this._off;
     const offCtx = this._offCtx;
 
-    // 1. Offscreen começa TOTALMENTE PRETO OPACO
     offCtx.clearRect(0, 0, W, H);
+
+    // ── PASSO 1: Pintar APENAS os objetos de sombra ─────────────
+    // NÃO há fillRect global — só os shapes dos objetos dark.
+    // O objeto _totalCover (99999×99999) já cobre tudo sozinho quando ativo.
     offCtx.globalCompositeOperation = 'source-over';
     offCtx.fillStyle = 'rgba(0,0,0,1)';
-    offCtx.fillRect(0, 0, W, H);
+    darkObjs.forEach(obj => this._fillDarkShape(offCtx, obj));
 
-    // 2. Pinta objetos de escuridão manual que NÃO sejam cobertura total
-    //    (a cobertura total já está embutida no fillRect acima)
-    const manualDark = darkObjs.filter(o => !o._totalCover);
-    if (manualDark.length > 0) {
-      offCtx.globalCompositeOperation = 'source-over';
-      offCtx.fillStyle = 'rgba(0,0,0,1)';
-      manualDark.forEach(obj => this._fillShape(offCtx, obj));
-    }
+    // ── PASSO 2: Recortar luz dos objetos de luz ────────────────
+    // Cada objeto de luz "perfura" a sombra com destination-out.
+    // Círculos: penumbra suave + luz plena
+    // Outros shapes (rect, polygon): só luz plena
 
-    // 3. Para cada fonte de luz: primeiro penumbra (suave), depois luz plena
-    //    Ambas usam destination-out para abrir buraco no preto
+    const gs           = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
+    const penumOpacity = Lighting.Model.penumbraOpacity !== undefined
+                         ? Lighting.Model.penumbraOpacity
+                         : 0.9; // 0 = transparente (luz), 1 = opaco (sombra)
+
     lightObjs.forEach(obj => {
-      const gs = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
+      if (obj.shape === 'circle') {
+        const lightR = ((obj.lightDiameter   || 4)  / 2) * gs;
+        const penumR = ((obj.penumbraDiameter || 8)  / 2) * gs;
+        const cx     = obj.x;
+        const cy     = obj.y;
 
-      // Raios em pixels (modelo armazena em células de grid)
-      const lightR   = ((obj.lightDiameter   || 6)  / 2) * gs;
-      const penumR   = ((obj.penumbraDiameter || 12) / 2) * gs;
-      const cx = obj.x;
-      const cy = obj.y;
+        // 2a. Penumbra: gradiente do raio de luz até o raio de penumbra
+        if (penumR > lightR) {
+          offCtx.save();
+          offCtx.globalCompositeOperation = 'destination-out';
+          // O gradiente vai de 1 (totalmente recortado) até (1 - penumOpacity) na borda
+          // penumOpacity=1 → borda opaca (sombra total) → stopFinal=0
+          // penumOpacity=0 → borda transparente (luz total) → stopFinal=1
+          const stopFinal = 1 - penumOpacity;
+          const grad = offCtx.createRadialGradient(cx, cy, lightR, cx, cy, penumR);
+          grad.addColorStop(0,   `rgba(0,0,0,1)`);
+          grad.addColorStop(0.5, `rgba(0,0,0,${(1 - penumOpacity * 0.5).toFixed(3)})`);
+          grad.addColorStop(1,   `rgba(0,0,0,${stopFinal.toFixed(3)})`);
+          offCtx.fillStyle = grad;
+          offCtx.beginPath();
+          offCtx.arc(cx, cy, penumR, 0, Math.PI * 2);
+          offCtx.fill();
+          offCtx.restore();
+        }
 
-      // 3a. Penumbra (gradiente de destination-out entre lightR e penumR)
-      if (penumR > lightR) {
+        // 2b. Luz plena: recorte total dentro de lightR
         offCtx.save();
         offCtx.globalCompositeOperation = 'destination-out';
-        const grad = offCtx.createRadialGradient(cx, cy, lightR * 0.85, cx, cy, penumR);
-        grad.addColorStop(0,   'rgba(0,0,0,1)');    // totalmente recortado
-        grad.addColorStop(0.5, 'rgba(0,0,0,0.65)'); // meio recortado (penumbra)
-        grad.addColorStop(1,   'rgba(0,0,0,0)');    // sem recorte (borda)
-        offCtx.fillStyle = grad;
+        offCtx.fillStyle = 'rgba(0,0,0,1)';
         offCtx.beginPath();
-        offCtx.arc(cx, cy, penumR, 0, Math.PI * 2);
+        offCtx.arc(cx, cy, lightR, 0, Math.PI * 2);
         offCtx.fill();
         offCtx.restore();
+
+      } else {
+        // Rect ou polygon de luz: recorte total da forma
+        offCtx.save();
+        offCtx.globalCompositeOperation = 'destination-out';
+        offCtx.fillStyle = 'rgba(0,0,0,1)';
+        this._fillLightShape(offCtx, obj);
+        offCtx.restore();
       }
-
-      // 3b. Luz plena (destination-out total dentro de lightR)
-      offCtx.save();
-      offCtx.globalCompositeOperation = 'destination-out';
-      offCtx.fillStyle = 'rgba(0,0,0,1)';
-      offCtx.beginPath();
-      offCtx.arc(cx, cy, lightR, 0, Math.PI * 2);
-      offCtx.fill();
-      offCtx.restore();
     });
 
-    // Para objetos de luz não-círculo (rect, polygon): luz plena sem penumbra
-    lightObjs.filter(o => o.shape !== 'circle').forEach(obj => {
-      offCtx.save();
-      offCtx.globalCompositeOperation = 'destination-out';
-      offCtx.fillStyle = 'rgba(0,0,0,1)';
-      this._fillShape(offCtx, obj);
-      offCtx.restore();
-    });
-
-    // 4. Copia offscreen → canvas visível (source-over normal)
+    // ── PASSO 3: Copia offscreen → canvas visível ───────────────
     ctx.globalCompositeOperation = 'source-over';
     ctx.drawImage(off, 0, 0);
 
-    // 5. Paredes e UI sempre por cima, no canvas visível
+    // ── PASSO 4: Paredes e UI ───────────────────────────────────
     this._drawWalls(ctx);
     this._drawUI();
   },
 
-  // ── Helpers de forma ────────────────────────────────────────
-
-  _fillShape(ctx, obj) {
+  // Preenche shapes de ESCURIDÃO (dark objects)
+  // Inclui rotação para rects
+  _fillDarkShape(ctx, obj) {
     ctx.save();
-    if (obj.rotation && obj.shape === 'rect') {
+    if (obj.shape === 'rect' && obj.rotation) {
       const cx = obj.x + (obj.width  || 100) / 2;
       const cy = obj.y + (obj.height || 100) / 2;
       ctx.translate(cx, cy);
@@ -172,10 +169,6 @@ Lighting.Render = {
     ctx.beginPath();
     if (obj.shape === 'rect') {
       ctx.rect(obj.x, obj.y, obj.width || 100, obj.height || 100);
-    } else if (obj.shape === 'circle') {
-      const gs     = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
-      const radius = ((obj.lightDiameter || 6) / 2) * gs;
-      ctx.arc(obj.x, obj.y, radius, 0, Math.PI * 2);
     } else if (obj.shape === 'polygon' && obj.points && obj.points.length >= 3) {
       ctx.moveTo(obj.points[0].x, obj.points[0].y);
       for (let i = 1; i < obj.points.length; i++) ctx.lineTo(obj.points[i].x, obj.points[i].y);
@@ -185,9 +178,11 @@ Lighting.Render = {
     ctx.restore();
   },
 
-  _strokeShape(ctx, obj) {
+  // Preenche shapes de LUZ não-circulares (rect, polygon)
+  // Separado de _fillDarkShape para evitar confusão de branches
+  _fillLightShape(ctx, obj) {
     ctx.save();
-    if (obj.rotation && obj.shape === 'rect') {
+    if (obj.shape === 'rect' && obj.rotation) {
       const cx = obj.x + (obj.width  || 100) / 2;
       const cy = obj.y + (obj.height || 100) / 2;
       ctx.translate(cx, cy);
@@ -197,10 +192,32 @@ Lighting.Render = {
     ctx.beginPath();
     if (obj.shape === 'rect') {
       ctx.rect(obj.x, obj.y, obj.width || 100, obj.height || 100);
+    } else if (obj.shape === 'polygon' && obj.points && obj.points.length >= 3) {
+      ctx.moveTo(obj.points[0].x, obj.points[0].y);
+      for (let i = 1; i < obj.points.length; i++) ctx.lineTo(obj.points[i].x, obj.points[i].y);
+      ctx.closePath();
+    }
+    ctx.fill();
+    ctx.restore();
+  },
+
+  // Stroke de um objeto para UI (seleção)
+  _strokeShape(ctx, obj) {
+    ctx.save();
+    if (obj.shape === 'rect' && obj.rotation) {
+      const cx = obj.x + (obj.width  || 100) / 2;
+      const cy = obj.y + (obj.height || 100) / 2;
+      ctx.translate(cx, cy);
+      ctx.rotate((obj.rotation || 0) * Math.PI / 180);
+      ctx.translate(-cx, -cy);
+    }
+    ctx.beginPath();
+    const gs = window.VTTGrid?.size || 50;
+    if (obj.shape === 'rect') {
+      ctx.rect(obj.x, obj.y, obj.width || 100, obj.height || 100);
     } else if (obj.shape === 'circle') {
-      const gs     = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
-      const radius = ((obj.lightDiameter || 6) / 2) * gs;
-      ctx.arc(obj.x, obj.y, radius, 0, Math.PI * 2);
+      const r = ((obj.lightDiameter || 4) / 2) * gs;
+      ctx.arc(obj.x, obj.y, r, 0, Math.PI * 2);
     } else if (obj.shape === 'polygon' && obj.points && obj.points.length >= 3) {
       ctx.moveTo(obj.points[0].x, obj.points[0].y);
       for (let i = 1; i < obj.points.length; i++) ctx.lineTo(obj.points[i].x, obj.points[i].y);
@@ -228,7 +245,111 @@ Lighting.Render = {
     ctx.restore();
   },
 
-  // ── UI: seleção, alças, preview de ferramenta ───────────────
+  // ── Alças de resize ─────────────────────────────────────────
+
+  getHandles(obj) {
+    const gs = window.VTTGrid?.size || 50;
+    if (obj.shape === 'rect') {
+      const { x, y } = obj;
+      const w = obj.width  || 100;
+      const h = obj.height || 100;
+      // Rotaciona as alças junto com o rect
+      const rot = (obj.rotation || 0) * Math.PI / 180;
+      const cx  = x + w/2, cy = y + h/2;
+      const rot2d = (px, py) => {
+        const dx = px - cx, dy = py - cy;
+        return {
+          x: cx + dx * Math.cos(rot) - dy * Math.sin(rot),
+          y: cy + dx * Math.sin(rot) + dy * Math.cos(rot),
+        };
+      };
+      return [
+        { ...rot2d(x,   y  ), cursor: 'nw-resize', handleId: 'tl' },
+        { ...rot2d(x+w, y  ), cursor: 'ne-resize', handleId: 'tr' },
+        { ...rot2d(x,   y+h), cursor: 'sw-resize', handleId: 'bl' },
+        { ...rot2d(x+w, y+h), cursor: 'se-resize', handleId: 'br' },
+        { ...rot2d(x+w/2, y  ), cursor: 'n-resize',  handleId: 'tm' },
+        { ...rot2d(x+w/2, y+h), cursor: 's-resize',  handleId: 'bm' },
+        { ...rot2d(x,     y+h/2), cursor: 'w-resize', handleId: 'ml' },
+        { ...rot2d(x+w,   y+h/2), cursor: 'e-resize', handleId: 'mr' },
+      ];
+    }
+    if (obj.shape === 'circle') {
+      const lightR = ((obj.lightDiameter   || 4)  / 2) * gs;
+      const penumR = ((obj.penumbraDiameter || 8)  / 2) * gs;
+      return [
+        { x: obj.x + lightR, y: obj.y, cursor: 'ew-resize', handleId: 'light-r'  },
+        { x: obj.x,          y: obj.y, cursor: 'move',       handleId: 'center'   },
+        { x: obj.x + penumR, y: obj.y, cursor: 'ew-resize', handleId: 'penum-r'  },
+      ];
+    }
+    return [];
+  },
+
+  getRotateHandlePos(obj) {
+    if (obj.shape !== 'rect') return null;
+    const rot = (obj.rotation || 0) * Math.PI / 180;
+    const rcx = obj.x + (obj.width  || 100) / 2;
+    const rcy = obj.y + (obj.height || 100) / 2;
+    // Alça 22px acima do centro superior, rotacionada
+    const dx = 0, dy = -(obj.height || 100) / 2 - 22;
+    return {
+      x: rcx + dx * Math.cos(rot) - dy * Math.sin(rot),
+      y: rcy + dx * Math.sin(rot) + dy * Math.cos(rot),
+    };
+  },
+
+  _drawHandles(ctx, obj) {
+    const gs = window.VTTGrid?.size || 50;
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+
+    this.getHandles(obj).forEach(h => {
+      if (h.handleId === 'light-r')  ctx.fillStyle = 'rgba(255,230,80,0.95)';
+      else if (h.handleId === 'penum-r') ctx.fillStyle = 'rgba(255,150,50,0.85)';
+      else if (h.handleId === 'center')  ctx.fillStyle = 'rgba(100,200,255,0.85)';
+      else                               ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.lineWidth   = 1;
+      ctx.beginPath();
+      ctx.arc(h.x, h.y, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+
+    // Para círculos: anéis de referência de luz e penumbra
+    if (obj.shape === 'circle') {
+      const lightR = ((obj.lightDiameter   || 4)  / 2) * gs;
+      const penumR = ((obj.penumbraDiameter || 8)  / 2) * gs;
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(255,230,80,0.6)';
+      ctx.beginPath(); ctx.arc(obj.x, obj.y, lightR, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,150,50,0.4)';
+      ctx.beginPath(); ctx.arc(obj.x, obj.y, penumR, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    ctx.restore();
+  },
+
+  _drawRotateHandle(ctx, obj) {
+    const rh = this.getRotateHandlePos(obj);
+    if (!rh) return;
+    const rcx = obj.x + (obj.width  || 100) / 2;
+    const rcy = obj.y + (obj.height || 100) / 2;
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle   = 'rgba(200,100,255,0.9)';
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    ctx.lineWidth   = 1;
+    ctx.beginPath(); ctx.arc(rh.x, rh.y, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = 'rgba(200,100,255,0.5)';
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(rcx, obj.y); ctx.lineTo(rh.x, rh.y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  },
 
   _drawUI() {
     if (!window.Lighting || !Lighting.Input) return;
@@ -240,7 +361,6 @@ Lighting.Render = {
     ctx.save();
     ctx.globalCompositeOperation = 'source-over';
 
-    // Objeto selecionado
     if (selectedId) {
       const obj = Lighting.Model.getObject(selectedId);
       if (obj) {
@@ -256,7 +376,7 @@ Lighting.Render = {
       }
     }
 
-    // Previews de ferramenta
+    // Previews
     ctx.strokeStyle = 'rgba(80,220,120,0.9)';
     ctx.fillStyle   = 'rgba(80,220,120,0.15)';
     ctx.lineWidth   = 2;
@@ -277,8 +397,7 @@ Lighting.Render = {
       const r  = Math.sqrt(dx * dx + dy * dy);
       ctx.beginPath();
       ctx.arc(toolState.start.x, toolState.start.y, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
+      ctx.fill(); ctx.stroke();
     }
 
     if (activeTool === 'polygon' && toolState.points && toolState.points.length > 0) {
@@ -304,140 +423,6 @@ Lighting.Render = {
 
     ctx.setLineDash([]);
     ctx.restore();
-  },
-
-  // Retorna as alças de redimensionamento de um objeto
-  // Cada alça: { x, y, cursor, handleId }
-  getHandles(obj) {
-    const gs = window.VTTGrid?.size || 50;
-
-    if (obj.shape === 'rect') {
-      const { x, y } = obj;
-      const w = obj.width  || 100;
-      const h = obj.height || 100;
-      return [
-        { x,     y,     cursor: 'nw-resize', handleId: 'tl' },
-        { x:x+w, y,     cursor: 'ne-resize', handleId: 'tr' },
-        { x,     y:y+h, cursor: 'sw-resize', handleId: 'bl' },
-        { x:x+w, y:y+h, cursor: 'se-resize', handleId: 'br' },
-        { x:x+w/2, y,     cursor: 'n-resize',  handleId: 'tm' },
-        { x:x+w/2, y:y+h, cursor: 's-resize',  handleId: 'bm' },
-        { x,       y:y+h/2, cursor: 'w-resize', handleId: 'ml' },
-        { x:x+w,   y:y+h/2, cursor: 'e-resize', handleId: 'mr' },
-      ];
-    }
-
-    if (obj.shape === 'circle') {
-      const lightR   = ((obj.lightDiameter   || 6)  / 2) * gs;
-      const penumR   = ((obj.penumbraDiameter || 12) / 2) * gs;
-      return [
-        { x: obj.x + lightR, y: obj.y, cursor: 'ew-resize', handleId: 'light-r'  },
-        { x: obj.x,          y: obj.y, cursor: 'move',       handleId: 'center'   },
-        { x: obj.x + penumR, y: obj.y, cursor: 'ew-resize', handleId: 'penum-r'  },
-      ];
-    }
-
-    return [];
-  },
-
-  _drawHandles(ctx, obj) {
-    const handles = this.getHandles(obj);
-    const gs      = window.VTTGrid?.size || 50;
-
-    handles.forEach(h => {
-      ctx.save();
-      ctx.globalCompositeOperation = 'source-over';
-
-      // Cor: alças de luz = amarelo, de penumbra = laranja, resto = branco
-      if (h.handleId === 'light-r')  ctx.fillStyle = 'rgba(255,230,80,0.95)';
-      else if (h.handleId === 'penum-r') ctx.fillStyle = 'rgba(255,150,50,0.85)';
-      else if (h.handleId === 'center')  ctx.fillStyle = 'rgba(100,200,255,0.85)';
-      else                               ctx.fillStyle = 'rgba(255,255,255,0.9)';
-
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-      ctx.lineWidth   = 1;
-      ctx.beginPath();
-      ctx.arc(h.x, h.y, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-    });
-
-    // Para círculo: desenha os anéis de referência
-    if (obj.shape === 'circle') {
-      const lightR = ((obj.lightDiameter   || 6)  / 2) * gs;
-      const penumR = ((obj.penumbraDiameter || 12) / 2) * gs;
-
-      ctx.save();
-      ctx.globalCompositeOperation = 'source-over';
-      // Anel de luz
-      ctx.strokeStyle = 'rgba(255,230,80,0.6)';
-      ctx.lineWidth   = 1;
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath();
-      ctx.arc(obj.x, obj.y, lightR, 0, Math.PI * 2);
-      ctx.stroke();
-      // Anel de penumbra
-      ctx.strokeStyle = 'rgba(255,150,50,0.4)';
-      ctx.beginPath();
-      ctx.arc(obj.x, obj.y, penumR, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
-    }
-  },
-
-  // Alça de rotação para rect: círculo acima do centro superior
-  _drawRotateHandle(ctx, obj) {
-    if (obj.shape !== 'rect') return;
-    const cx  = obj.x + (obj.width  || 100) / 2;
-    const cy  = obj.y - 22;
-    const rot = (obj.rotation || 0) * Math.PI / 180;
-
-    // Rotaciona em torno do centro do rect
-    const rcx = obj.x + (obj.width  || 100) / 2;
-    const rcy = obj.y + (obj.height || 100) / 2;
-    const dx  = cx - rcx;
-    const dy  = cy - rcy;
-    const rx  = rcx + dx * Math.cos(rot) - dy * Math.sin(rot);
-    const ry  = rcy + dx * Math.sin(rot) + dy * Math.cos(rot);
-
-    ctx.save();
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle   = 'rgba(200,100,255,0.9)';
-    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-    ctx.lineWidth   = 1;
-    ctx.beginPath();
-    ctx.arc(rx, ry, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    // Linha do centro ao handle
-    ctx.strokeStyle = 'rgba(200,100,255,0.5)';
-    ctx.lineWidth   = 1;
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath();
-    ctx.moveTo(rcx, obj.y);
-    ctx.lineTo(rx, ry);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
-  },
-
-  // Retorna a posição da alça de rotação para hit-test
-  getRotateHandlePos(obj) {
-    if (obj.shape !== 'rect') return null;
-    const cx  = obj.x + (obj.width  || 100) / 2;
-    const cy  = obj.y - 22;
-    const rot = (obj.rotation || 0) * Math.PI / 180;
-    const rcx = obj.x + (obj.width  || 100) / 2;
-    const rcy = obj.y + (obj.height || 100) / 2;
-    const dx  = cx - rcx;
-    const dy  = cy - rcy;
-    return {
-      x: rcx + dx * Math.cos(rot) - dy * Math.sin(rot),
-      y: rcy + dx * Math.sin(rot) + dy * Math.cos(rot),
-    };
   },
 };
 

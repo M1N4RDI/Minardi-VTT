@@ -1,36 +1,38 @@
 <script>
-// lighting-model.html — Modelo unificado de iluminação
+// lighting-model.html
 console.log('lighting-model carregado');
 
 window.Lighting = window.Lighting || {};
 
 Lighting.Model = {
   gridSize: 50,
-  objects: [],   // [{ id, name, shape, mode, locked, visible, ... }]
-  walls:   [],   // [{ id, p1, p2, locked, visible }]
-  _nextId: 1,
-  masterReveal: false,
-  enabled: false,
+  objects:  [],
+  walls:    [],
+  _nextId:  1,
+  masterReveal:     false,
+  enabled:          false,
+  penumbraOpacity:  0.9,   // 0 = transparente (luz), 1 = sombra total
 
   addObject(props) {
-    const id = this._nextId++;
+    const id  = this._nextId++;
     const obj = Object.assign({
       id,
-      name:        props.name        || 'Objeto',
-      shape:       props.shape       || 'rect',
-      mode:        props.mode        || 'dark',
-      locked:      false,
-      visible:     true,
-      lightSource: props.lightSource || false,
-      x:           props.x           || 0,
-      y:           props.y           || 0,
-      width:       props.width       || 100,
-      height:      props.height      || 100,
-      radius:      props.radius      || 50,
-      luminosity:  props.luminosity  || 6,
-      penumbra:    props.penumbra    || 4,
-      points:      props.points      || [],
-      tokenId:     props.tokenId     || null,
+      name:             props.name             || 'Objeto',
+      shape:            props.shape            || 'rect',
+      mode:             props.mode             || 'dark',
+      locked:           false,
+      visible:          true,
+      x:                props.x                || 0,
+      y:                props.y                || 0,
+      width:            props.width            || 100,
+      height:           props.height           || 100,
+      rotation:         props.rotation         || 0,
+      radius:           props.radius           || 50,
+      lightDiameter:    props.lightDiameter    || 4,
+      penumbraDiameter: props.penumbraDiameter || 8,
+      points:           props.points           || [],
+      tokenId:          props.tokenId          || null,
+      _totalCover:      props._totalCover      || false,
     }, props);
     this.objects.push(obj);
     return obj;
@@ -43,108 +45,85 @@ Lighting.Model = {
     return this.objects[idx];
   },
 
-  removeObject(id) {
-    this.objects = this.objects.filter(o => o.id !== id);
-  },
-
-  getObject(id) {
-    return this.objects.find(o => o.id === id);
-  },
+  removeObject(id) { this.objects = this.objects.filter(o => o.id !== id); },
+  getObject(id)    { return this.objects.find(o => o.id === id); },
 
   addWall(p1, p2, opts = {}) {
-    const id = this._nextId++;
+    const id   = this._nextId++;
     const wall = Object.assign({ id, p1: { ...p1 }, p2: { ...p2 }, locked: false, visible: true }, opts);
     this.walls.push(wall);
     return wall;
   },
 
-  removeWall(id) {
-    this.walls = this.walls.filter(w => w.id !== id);
-  },
-
-  getWall(id) {
-    return this.walls.find(w => w.id === id);
-  },
+  removeWall(id) { this.walls = this.walls.filter(w => w.id !== id); },
+  getWall(id)    { return this.walls.find(w => w.id === id); },
 
   toggleObjectMode(id) {
-    const obj = this.getObject(id);
-    if (!obj) return null;
-    return this.updateObject(id, { mode: obj.mode === 'dark' ? 'light' : 'dark' });
+    const o = this.getObject(id);
+    if (!o) return null;
+    return this.updateObject(id, { mode: o.mode === 'dark' ? 'light' : 'dark' });
   },
 
   toggleObjectLocked(id) {
-    const obj = this.getObject(id);
-    if (!obj) return null;
-    return this.updateObject(id, { locked: !obj.locked });
+    const o = this.getObject(id);
+    if (!o) return null;
+    return this.updateObject(id, { locked: !o.locked });
   },
 
   duplicateObject(id) {
     const orig = this.getObject(id);
     if (!orig) return null;
-    const copy = Object.assign({}, orig);
-    copy.id    = this._nextId++;
-    copy.name  = 'Cópia de ' + orig.name;
-    copy.x    += this.gridSize * 0.5;
-    copy.y    += this.gridSize * 0.5;
+    const copy     = Object.assign({}, orig);
+    copy.id        = this._nextId++;
+    copy.name      = 'Cópia de ' + orig.name;
+    copy.x        += (this.gridSize || 50) * 0.5;
+    copy.y        += (this.gridSize || 50) * 0.5;
+    copy._totalCover = false;
     if (copy.points) copy.points = copy.points.map(p => ({ x: p.x, y: p.y }));
     this.objects.push(copy);
     return copy;
   },
 
-  // Verifica se existe a cobertura total
   hasTotalCover() {
     return this.objects.some(o => o._totalCover === true);
   },
 
-  // Toggle de cobertura total (dark 99999×99999)
   toggleTotalCover() {
-    const existing = this.objects.find(o => o._totalCover === true);
-    if (existing) {
-      this.removeObject(existing.id);
-      return false;
-    } else {
-      this.addObject({
-        name: 'Cobertura total',
-        shape: 'rect',
-        mode: 'dark',
-        x: 0, y: 0,
-        width: 99999, height: 99999,
-        locked: true,
-        _totalCover: true,
-      });
-      return true;
-    }
+    const ex = this.objects.find(o => o._totalCover === true);
+    if (ex) { this.removeObject(ex.id); return false; }
+    this.addObject({
+      name: 'Cobertura total', shape: 'rect', mode: 'dark',
+      x: 0, y: 0, width: 99999, height: 99999,
+      locked: true, _totalCover: true,
+    });
+    return true;
   },
 
   _save() {
     try {
-      const payload = JSON.stringify({
-        objects:      this.objects,
-        walls:        this.walls,
-        masterReveal: this.masterReveal,
-        enabled:      this.enabled,
-        _nextId:      this._nextId,
-      });
-      localStorage.setItem('lighting_state_v3', payload);
-      // SEM chamada google.script.run — objetos de iluminação são dados de sessão
-    } catch (e) {
-      console.warn('Lighting save failed', e);
-    }
+      localStorage.setItem('lighting_state_v3', JSON.stringify({
+        objects:         this.objects,
+        walls:           this.walls,
+        masterReveal:    this.masterReveal,
+        enabled:         this.enabled,
+        penumbraOpacity: this.penumbraOpacity,
+        _nextId:         this._nextId,
+      }));
+    } catch(e) { console.warn('Lighting save failed', e); }
   },
 
   _load() {
     try {
       const raw = localStorage.getItem('lighting_state_v3');
       if (!raw) return;
-      const s = JSON.parse(raw);
-      this.objects      = s.objects      || [];
-      this.walls        = s.walls        || [];
-      this.masterReveal = s.masterReveal || false;
-      this.enabled      = s.enabled      || false;
-      this._nextId      = s._nextId      || (this.objects.length + this.walls.length + 1);
-    } catch (e) {
-      console.warn('Lighting load failed', e);
-    }
+      const s              = JSON.parse(raw);
+      this.objects         = s.objects         || [];
+      this.walls           = s.walls           || [];
+      this.masterReveal    = s.masterReveal     || false;
+      this.enabled         = s.enabled         || false;
+      this.penumbraOpacity = s.penumbraOpacity !== undefined ? s.penumbraOpacity : 0.9;
+      this._nextId         = s._nextId         || (this.objects.length + this.walls.length + 1);
+    } catch(e) { console.warn('Lighting load failed', e); }
   },
 };
 

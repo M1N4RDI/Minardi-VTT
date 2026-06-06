@@ -1,20 +1,19 @@
 <script>
-// lighting-ui.html — UI completa do sistema de iluminação
+// lighting-ui.html
 console.log('lighting-ui carregado');
 
 window.Lighting = window.Lighting || {};
 
 Lighting.UI = {
   initialized: false,
-  sidebar: null,
+  sidebar:     null,
   toolButtons: {},
-  _enableBtn: null,
-  _coverBtn: null,
+  _enableBtn:  null,
+  _coverBtn:   null,
 
   init() {
     if (this.initialized) return;
     this.initialized = true;
-
     setTimeout(() => {
       const sidebar = document.getElementById('sidebar');
       if (!sidebar) { setTimeout(() => this.init(), 200); return; }
@@ -36,7 +35,7 @@ Lighting.UI = {
     title.innerText = 'Iluminação';
     cat.appendChild(title);
 
-    // ── Botão de MODO (ativa o mouse para edição) ──────────────
+    // ── Botão de modo ──────────────────────────────────────────
     const modeBtn = document.createElement('button');
     modeBtn.id = 'lighting-mode-btn';
     modeBtn.className = 'mode-btn mode-lighting';
@@ -46,40 +45,39 @@ Lighting.UI = {
     VTTMode._categoryIds.lighting = 'cat-lighting';
     cat.appendChild(modeBtn);
 
-    // ── Toggle fog on/off ──────────────────────────────────────
+    // ── Toggle fog ─────────────────────────────────────────────
     const enableBtn = document.createElement('button');
     enableBtn.id = 'lighting-enable-btn';
     enableBtn.className = 'btn-full';
     enableBtn.style.marginTop = '6px';
-    const _syncEnableBtn = () => {
-      enableBtn.textContent  = Lighting.Model.enabled ? '🌑 Fog: LIGADO' : '☀ Fog: DESLIGADO';
+    const _syncEnable = () => {
+      enableBtn.textContent      = Lighting.Model.enabled ? '🌑 Fog: LIGADO' : '☀ Fog: DESLIGADO';
       enableBtn.style.background = Lighting.Model.enabled ? '#5a3a00' : '#333';
     };
-    _syncEnableBtn();
-    enableBtn.title  = 'Liga/desliga o fog of war (escuridão)';
+    _syncEnable();
     enableBtn.onclick = () => {
       Lighting.Model.enabled = !Lighting.Model.enabled;
       Lighting.Model._save();
-      _syncEnableBtn();
+      _syncEnable();
       Lighting.Render.draw();
     };
     this._enableBtn = enableBtn;
     cat.appendChild(enableBtn);
 
-    // ── Toggle cobertura total (dark 99999×99999) ──────────────
+    // ── Toggle cobertura total ─────────────────────────────────
     const coverBtn = document.createElement('button');
     coverBtn.className = 'btn-full';
     coverBtn.style.marginTop = '4px';
-    const _syncCoverBtn = () => {
+    const _syncCover = () => {
       const active = Lighting.Model.hasTotalCover();
       coverBtn.textContent      = active ? '☀ Remover Cobertura Total' : '🌑 Cobrir Mapa Todo';
       coverBtn.style.background = active ? '#1a3a5c' : '';
     };
-    _syncCoverBtn();
+    _syncCover();
     coverBtn.onclick = () => {
       Lighting.Model.toggleTotalCover();
       Lighting.Model._save();
-      _syncCoverBtn();
+      _syncCover();
       this.refresh();
       Lighting.Render.draw();
     };
@@ -90,24 +88,70 @@ Lighting.UI = {
     const revealBtn = document.createElement('button');
     revealBtn.className = 'btn-full';
     revealBtn.style.marginTop = '4px';
-    const _syncRevealBtn = () => {
+    const _syncReveal = () => {
       revealBtn.textContent      = Lighting.Model.masterReveal ? '👁 Revelar: ON' : '👁 Revelar: OFF';
       revealBtn.style.background = Lighting.Model.masterReveal ? '#1a3a5c' : '';
     };
-    _syncRevealBtn();
-    revealBtn.title  = 'Mestre vê tudo — jogadores continuam com o fog normal';
+    _syncReveal();
     revealBtn.onclick = () => {
       Lighting.Model.masterReveal = !Lighting.Model.masterReveal;
       Lighting.Model._save();
-      _syncRevealBtn();
+      _syncReveal();
       Lighting.Render.draw();
     };
     cat.appendChild(revealBtn);
 
-    // ── FERRAMENTAS ────────────────────────────────────────────
+    // ── Slider de opacidade de penumbra ───────────────────────
+    const penumLabel = document.createElement('div');
+    penumLabel.style.cssText =
+      'font-size:0.78em;font-weight:bold;margin:14px 0 4px;opacity:0.8;text-transform:uppercase;';
+    penumLabel.innerText = 'Opacidade da Penumbra';
+    cat.appendChild(penumLabel);
+
+    const penumDesc = document.createElement('div');
+    penumDesc.style.cssText = 'font-size:0.72em;opacity:0.6;margin-bottom:6px;';
+    penumDesc.innerText = '0% = transparente (luz) · 100% = sombra total';
+    cat.appendChild(penumDesc);
+
+    // Container slider + número (igual ao de escala de mapa)
+    const penumRow = document.createElement('div');
+    penumRow.style.cssText = 'display:flex;gap:6px;align-items:center;';
+
+    const penumSlider = document.createElement('input');
+    penumSlider.type  = 'range';
+    penumSlider.min   = '0';
+    penumSlider.max   = '100';
+    penumSlider.step  = '1';
+    penumSlider.value = Math.round((Lighting.Model.penumbraOpacity || 0.9) * 100);
+    penumSlider.style.flex = '1';
+
+    const penumNumber = document.createElement('input');
+    penumNumber.type  = 'number';
+    penumNumber.min   = '0';
+    penumNumber.max   = '100';
+    penumNumber.value = penumSlider.value;
+    penumNumber.style.cssText = 'width:54px;padding:4px;text-align:center;';
+
+    const _applyPenum = (val) => {
+      val = Math.min(100, Math.max(0, isNaN(val) ? 90 : val));
+      penumSlider.value = val;
+      penumNumber.value = val;
+      Lighting.Model.penumbraOpacity = val / 100;
+      Lighting.Model._save();
+      Lighting.Render.draw();
+    };
+
+    penumSlider.addEventListener('input',  () => _applyPenum(parseInt(penumSlider.value)));
+    penumNumber.addEventListener('change', () => _applyPenum(parseInt(penumNumber.value)));
+
+    penumRow.appendChild(penumSlider);
+    penumRow.appendChild(penumNumber);
+    cat.appendChild(penumRow);
+
+    // ── Ferramentas ────────────────────────────────────────────
     const toolsLabel = document.createElement('div');
     toolsLabel.style.cssText =
-      'font-size:0.78em;font-weight:bold;margin:12px 0 6px;opacity:0.8;text-transform:uppercase;';
+      'font-size:0.78em;font-weight:bold;margin:14px 0 6px;opacity:0.8;text-transform:uppercase;';
     toolsLabel.innerText = 'Ferramentas';
     cat.appendChild(toolsLabel);
 
@@ -115,11 +159,11 @@ Lighting.UI = {
     toolGrid.style.cssText = 'display:grid;grid-template-columns:repeat(5,1fr);gap:5px;';
 
     const tools = [
-      { id: 'select',  icon: '🖱',  title: 'Selecionar'   },
-      { id: 'rect',    icon: '⬜', title: 'Retângulo'    },
-      { id: 'circle',  icon: '⚪', title: 'Círculo'      },
-      { id: 'polygon', icon: '⬡',  title: 'Polígono'     },
-      { id: 'wall',    icon: '🚧', title: 'Parede'       },
+      { id: 'select',  icon: '🖱',  title: 'Selecionar' },
+      { id: 'rect',    icon: '⬜', title: 'Retângulo'  },
+      { id: 'circle',  icon: '⚪', title: 'Círculo'    },
+      { id: 'polygon', icon: '⬡',  title: 'Polígono'   },
+      { id: 'wall',    icon: '🚧', title: 'Parede'     },
     ];
 
     tools.forEach(tool => {
@@ -139,7 +183,7 @@ Lighting.UI = {
     });
     cat.appendChild(toolGrid);
 
-    // ── LISTA DE OBJETOS ───────────────────────────────────────
+    // ── Lista de objetos ───────────────────────────────────────
     const listLabel = document.createElement('div');
     listLabel.style.cssText =
       'font-size:0.78em;font-weight:bold;margin:12px 0 4px;opacity:0.8;text-transform:uppercase;';
@@ -151,7 +195,7 @@ Lighting.UI = {
     objectList.style.cssText = 'max-height:180px;overflow-y:auto;font-size:0.85em;';
     cat.appendChild(objectList);
 
-    // ── PROPRIEDADES ───────────────────────────────────────────
+    // ── Propriedades ───────────────────────────────────────────
     const propsLabel = document.createElement('div');
     propsLabel.style.cssText =
       'font-size:0.78em;font-weight:bold;margin:12px 0 4px;opacity:0.8;text-transform:uppercase;';
@@ -159,24 +203,21 @@ Lighting.UI = {
     cat.appendChild(propsLabel);
 
     const propPanel = document.createElement('div');
-    propPanel.id    = 'lighting-props-panel';
+    propPanel.id = 'lighting-props-panel';
     propPanel.style.fontSize = '0.85em';
     cat.appendChild(propPanel);
 
     this.sidebar.appendChild(cat);
-
     if (typeof initCollapseForCategory === 'function') initCollapseForCategory(cat);
-
-    // Notifica VTTMode sobre a nova categoria
     setTimeout(() => { if (window.VTTMode) VTTMode.setMode(VTTMode.active); }, 100);
   },
 
   _updateToolButtons() {
     const active = Lighting.Input ? Lighting.Input.activeTool : 'select';
-    Object.keys(this.toolButtons).forEach(key => {
-      const btn = this.toolButtons[key];
-      btn.style.background  = key === active ? 'rgba(150,200,255,0.5)' : 'rgba(100,100,100,0.3)';
-      btn.style.borderColor = key === active ? 'rgba(200,230,255,0.8)' : 'transparent';
+    Object.keys(this.toolButtons).forEach(k => {
+      const btn = this.toolButtons[k];
+      btn.style.background  = k === active ? 'rgba(150,200,255,0.5)' : 'rgba(100,100,100,0.3)';
+      btn.style.borderColor = k === active ? 'rgba(200,230,255,0.8)' : 'transparent';
     });
   },
 
@@ -184,9 +225,8 @@ Lighting.UI = {
     this._updateToolButtons();
     this._renderObjectList();
     this._renderProperties();
-    // Sincroniza botões de estado
     if (this._enableBtn) {
-      this._enableBtn.textContent  = Lighting.Model.enabled ? '🌑 Fog: LIGADO' : '☀ Fog: DESLIGADO';
+      this._enableBtn.textContent      = Lighting.Model.enabled ? '🌑 Fog: LIGADO' : '☀ Fog: DESLIGADO';
       this._enableBtn.style.background = Lighting.Model.enabled ? '#5a3a00' : '#333';
     }
     if (this._coverBtn) {
@@ -201,31 +241,28 @@ Lighting.UI = {
     if (!listEl) return;
     listEl.innerHTML = '';
 
-    // Filtra a cobertura total da lista (gerenciada pelo botão dedicado)
     const darkObjs  = Lighting.Model.objects.filter(o => o.mode === 'dark'  && !o._totalCover);
     const lightObjs = Lighting.Model.objects.filter(o => o.mode === 'light');
 
-    if (darkObjs.length)              this._createListGroup(listEl, '▼ Escuridão', darkObjs);
-    if (lightObjs.length)             this._createListGroup(listEl, '▼ Luz',       lightObjs);
-    if (Lighting.Model.walls.length)  this._createWallGroup(listEl);
+    if (darkObjs.length)             this._mkGroup(listEl, '▼ Escuridão', darkObjs);
+    if (lightObjs.length)            this._mkGroup(listEl, '▼ Luz',       lightObjs);
+    if (Lighting.Model.walls.length) this._mkWallGroup(listEl);
 
     if (!darkObjs.length && !lightObjs.length && !Lighting.Model.walls.length) {
-      const empty = document.createElement('div');
-      empty.style.cssText = 'opacity:0.55;padding:6px;font-size:0.85em;';
-      empty.innerText = 'Nenhum objeto. Use as ferramentas acima.';
-      listEl.appendChild(empty);
+      const e = document.createElement('div');
+      e.style.cssText = 'opacity:0.55;padding:6px;font-size:0.85em;';
+      e.innerText = 'Nenhum objeto. Use as ferramentas acima.';
+      listEl.appendChild(e);
     }
   },
 
-  _createListGroup(parent, label, objects) {
-    const group = document.createElement('div');
-    group.style.marginBottom = '6px';
-
-    const header = document.createElement('div');
-    header.style.cssText = 'font-weight:bold;font-size:0.78em;margin-bottom:3px;opacity:0.7;';
-    header.innerText = label;
-    group.appendChild(header);
-
+  _mkGroup(parent, label, objects) {
+    const g = document.createElement('div');
+    g.style.marginBottom = '6px';
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'font-weight:bold;font-size:0.78em;margin-bottom:3px;opacity:0.7;';
+    hdr.innerText = label;
+    g.appendChild(hdr);
     objects.forEach(obj => {
       const item = document.createElement('div');
       const sel  = Lighting.Input && Lighting.Input.selectedObjectId === obj.id;
@@ -233,64 +270,54 @@ Lighting.UI = {
         'padding:5px 7px;border-radius:4px;cursor:pointer;font-size:0.85em;' +
         'display:flex;justify-content:space-between;align-items:center;' +
         (sel ? 'background:rgba(100,150,200,0.35);' : '');
+
       const nameSpan = document.createElement('span');
       nameSpan.innerText = (obj.locked ? '🔒 ' : '') + obj.name;
       item.appendChild(nameSpan);
 
-      // Botão rápido de excluir na lista
-      const delBtn = document.createElement('button');
-      delBtn.innerText = '✕';
-      delBtn.style.cssText =
-        'background:none;border:none;color:rgba(200,80,80,0.7);cursor:pointer;' +
-        'padding:0 3px;font-size:0.9em;';
-      delBtn.title = 'Excluir';
-      delBtn.onclick = e => {
+      const del = document.createElement('button');
+      del.innerText = '✕';
+      del.style.cssText = 'background:none;border:none;color:rgba(200,80,80,0.7);cursor:pointer;padding:0 3px;';
+      del.onclick = e => {
         e.stopPropagation();
         Lighting.Model.removeObject(obj.id);
         Lighting.Model._save();
         if (Lighting.Input) Lighting.Input.selectedObjectId = null;
-        this.refresh();
-        Lighting.Render.draw();
+        this.refresh(); Lighting.Render.draw();
       };
-      item.appendChild(delBtn);
+      item.appendChild(del);
 
       item.addEventListener('click', () => {
         if (Lighting.Input) Lighting.Input.selectedObjectId = obj.id;
-        this.refresh();
-        Lighting.Render.draw();
+        this.refresh(); Lighting.Render.draw();
       });
       item.addEventListener('contextmenu', e => {
         e.preventDefault();
         this.showContextMenu(obj.id, { x: e.clientX, y: e.clientY });
       });
-      group.appendChild(item);
+      g.appendChild(item);
     });
-
-    parent.appendChild(group);
+    parent.appendChild(g);
   },
 
-  _createWallGroup(parent) {
-    const group = document.createElement('div');
-    group.style.marginBottom = '6px';
-
-    const header = document.createElement('div');
-    header.style.cssText = 'font-weight:bold;font-size:0.78em;margin-bottom:3px;opacity:0.7;';
-    header.innerText = '▼ Paredes';
-    group.appendChild(header);
-
+  _mkWallGroup(parent) {
+    const g = document.createElement('div');
+    g.style.marginBottom = '6px';
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'font-weight:bold;font-size:0.78em;margin-bottom:3px;opacity:0.7;';
+    hdr.innerText = '▼ Paredes';
+    g.appendChild(hdr);
     Lighting.Model.walls.forEach((wall, idx) => {
       const item = document.createElement('div');
       item.style.cssText =
         'padding:5px 7px;border-radius:4px;font-size:0.85em;' +
         'display:flex;justify-content:space-between;align-items:center;';
-      const nameSpan = document.createElement('span');
-      nameSpan.innerText = `Parede ${idx + 1}`;
-      item.appendChild(nameSpan);
-
+      const nm = document.createElement('span');
+      nm.innerText = `Parede ${idx + 1}`;
+      item.appendChild(nm);
       const del = document.createElement('button');
       del.innerText = '✕';
-      del.style.cssText =
-        'background:none;border:none;color:rgba(200,80,80,0.7);cursor:pointer;padding:0 3px;';
+      del.style.cssText = 'background:none;border:none;color:rgba(200,80,80,0.7);cursor:pointer;padding:0 3px;';
       del.onclick = () => {
         Lighting.Model.removeWall(wall.id);
         Lighting.Model._save();
@@ -299,117 +326,74 @@ Lighting.UI = {
         this.refresh();
       };
       item.appendChild(del);
-      group.appendChild(item);
+      g.appendChild(item);
     });
-
-    parent.appendChild(group);
+    parent.appendChild(g);
   },
 
   _renderProperties() {
-    const propsEl = document.getElementById('lighting-props-panel');
-    if (!propsEl) return;
-    propsEl.innerHTML = '';
-
-    const selectedId = Lighting.Input ? Lighting.Input.selectedObjectId : null;
-    if (!selectedId) {
-      const nosel = document.createElement('div');
-      nosel.style.cssText = 'opacity:0.55;padding:4px;font-size:0.85em;';
-      nosel.innerText = 'Clique em um objeto para editar.';
-      propsEl.appendChild(nosel);
-      return;
+    const el = document.getElementById('lighting-props-panel');
+    if (!el) return;
+    el.innerHTML = '';
+    const selId = Lighting.Input ? Lighting.Input.selectedObjectId : null;
+    if (!selId) {
+      const m = document.createElement('div');
+      m.style.cssText = 'opacity:0.55;padding:4px;font-size:0.85em;';
+      m.innerText = 'Clique em um objeto para editar.';
+      el.appendChild(m); return;
     }
-
-    const obj = Lighting.Model.getObject(selectedId);
+    const obj = Lighting.Model.getObject(selId);
     if (!obj) return;
 
-    this._createPropField(propsEl, 'Nome', obj.name, val => {
+    this._mkPropField(el, 'Nome', obj.name, val => {
       Lighting.Model.updateObject(obj.id, { name: val });
-      Lighting.Model._save();
-      this._renderObjectList();
+      Lighting.Model._save(); this._renderObjectList();
     });
 
     const info = document.createElement('div');
     info.style.cssText = 'font-size:0.78em;opacity:0.65;margin-bottom:8px;';
-    const shapeLabel = { rect: 'Retângulo', circle: 'Círculo', polygon: 'Polígono' };
-    info.innerText = `${obj.mode === 'dark' ? 'Escuridão' : 'Luz'} · ${shapeLabel[obj.shape] || obj.shape}`;
-    propsEl.appendChild(info);
+    info.innerText = `${obj.mode === 'dark' ? 'Escuridão' : 'Luz'} · ${{ rect:'Retângulo', circle:'Círculo', polygon:'Polígono' }[obj.shape] || obj.shape}`;
+    el.appendChild(info);
 
-    if (obj.mode === 'light') {
-      this._createPropField(propsEl, 'Penumbra (grid)', obj.penumbra || 4, val => {
-        Lighting.Model.updateObject(obj.id, { penumbra: Math.max(0, Number(val) || 0) });
-        Lighting.Model._save();
-        Lighting.Render.draw();
-      }, 'number');
-    }
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:8px;';
 
-    const buttonRow = document.createElement('div');
-    buttonRow.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:8px;';
-
-    const toggleBtn = document.createElement('button');
-    toggleBtn.className  = 'btn-full';
-    toggleBtn.style.fontSize = '0.72em';
-    toggleBtn.innerText  = obj.mode === 'dark' ? 'Tornar Luz' : 'Tornar Escuridão';
-    toggleBtn.onclick    = () => {
-      Lighting.Model.toggleObjectMode(obj.id);
-      Lighting.Model._save();
-      this.refresh();
-      Lighting.Render.draw();
+    const mkBtn = (label, bg, action) => {
+      const b = document.createElement('button');
+      b.className = 'btn-full';
+      b.style.cssText = `font-size:0.72em;${bg ? 'background:' + bg + ';' : ''}`;
+      b.innerText = label;
+      b.onclick   = action;
+      return b;
     };
-    buttonRow.appendChild(toggleBtn);
 
-    const dupBtn = document.createElement('button');
-    dupBtn.className  = 'btn-full';
-    dupBtn.style.fontSize = '0.72em';
-    dupBtn.innerText  = 'Duplicar';
-    dupBtn.onclick    = () => {
-      Lighting.Model.duplicateObject(obj.id);
-      Lighting.Model._save();
-      this.refresh();
-      Lighting.Render.draw();
-    };
-    buttonRow.appendChild(dupBtn);
-
-    const lockBtn = document.createElement('button');
-    lockBtn.className  = 'btn-full';
-    lockBtn.style.fontSize = '0.72em';
-    lockBtn.innerText  = obj.locked ? '🔓 Desbloquear' : '🔒 Bloquear';
-    lockBtn.onclick    = () => {
-      Lighting.Model.toggleObjectLocked(obj.id);
-      Lighting.Model._save();
-      this.refresh();
-    };
-    buttonRow.appendChild(lockBtn);
-
-    const delBtn = document.createElement('button');
-    delBtn.className  = 'btn-full';
-    delBtn.style.cssText = 'font-size:0.72em;background:#7a2a2a;';
-    delBtn.innerText  = '🗑 Excluir';
-    delBtn.onclick    = () => {
-      Lighting.Model.removeObject(obj.id);
-      Lighting.Model._save();
+    row.appendChild(mkBtn(obj.mode === 'dark' ? 'Tornar Luz' : 'Tornar Escuridão', '', () => {
+      Lighting.Model.toggleObjectMode(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw();
+    }));
+    row.appendChild(mkBtn('Duplicar', '', () => {
+      Lighting.Model.duplicateObject(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw();
+    }));
+    row.appendChild(mkBtn(obj.locked ? '🔓 Desbloquear' : '🔒 Bloquear', '', () => {
+      Lighting.Model.toggleObjectLocked(obj.id); Lighting.Model._save(); this.refresh();
+    }));
+    row.appendChild(mkBtn('🗑 Excluir', '#7a2a2a', () => {
+      Lighting.Model.removeObject(obj.id); Lighting.Model._save();
       if (Lighting.Input) Lighting.Input.selectedObjectId = null;
-      this.refresh();
-      Lighting.Render.draw();
-    };
-    buttonRow.appendChild(delBtn);
-
-    propsEl.appendChild(buttonRow);
+      this.refresh(); Lighting.Render.draw();
+    }));
+    el.appendChild(row);
   },
 
-  _createPropField(parent, label, value, onChange, type = 'text') {
-    const row   = document.createElement('div');
+  _mkPropField(parent, label, value, onChange, type = 'text') {
+    const row = document.createElement('div');
     row.style.marginBottom = '7px';
-    const lbl   = document.createElement('label');
-    lbl.innerText = label;
-    row.appendChild(lbl);
-    const input = document.createElement('input');
-    input.type  = type;
-    input.value = value;
-    input.addEventListener('change', e => onChange(e.target.value));
-    row.appendChild(input);
-    parent.appendChild(row);
+    const lbl = document.createElement('label'); lbl.innerText = label;
+    const inp = document.createElement('input'); inp.type = type; inp.value = value;
+    inp.addEventListener('change', e => onChange(e.target.value));
+    row.appendChild(lbl); row.appendChild(inp); parent.appendChild(row);
   },
 
+  // ── Context menu ──────────────────────────────────────────────
   showContextMenu(objId, pos) {
     const obj = Lighting.Model.getObject(objId);
     if (!obj) return;
@@ -422,7 +406,7 @@ Lighting.UI = {
     menu.style.cssText =
       `position:fixed;left:${pos.x}px;top:${pos.y}px;` +
       'background:rgba(24,24,24,0.97);border:1px solid rgba(200,200,200,0.2);' +
-      'border-radius:7px;padding:4px;z-index:20000;min-width:180px;' +
+      'border-radius:7px;padding:4px;z-index:20000;min-width:200px;' +
       'box-shadow:0 4px 16px rgba(0,0,0,0.65);font-size:0.85em;';
 
     const mkItem = (icon, label, action) => {
@@ -437,6 +421,22 @@ Lighting.UI = {
       menu.appendChild(btn);
     };
 
+    const mkSep = () => {
+      const s = document.createElement('div');
+      s.style.cssText = 'border-top:1px solid rgba(200,200,200,0.1);margin:3px 8px;';
+      menu.appendChild(s);
+    };
+
+    const mkSectionLabel = (text) => {
+      const l = document.createElement('div');
+      l.style.cssText =
+        'padding:6px 10px 2px;font-size:0.75em;text-transform:uppercase;' +
+        'opacity:0.5;letter-spacing:0.5px;';
+      l.innerText = text;
+      menu.appendChild(l);
+    };
+
+    // Ações comuns
     mkItem('✏️', 'Renomear', () => {
       const n = prompt('Novo nome:', obj.name);
       if (n) { Lighting.Model.updateObject(obj.id, { name: n }); Lighting.Model._save(); this.refresh(); }
@@ -451,17 +451,96 @@ Lighting.UI = {
            () => { Lighting.Model.duplicateObject(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); });
     mkItem('🗑', 'Excluir',
            () => {
-             Lighting.Model.removeObject(obj.id);
-             Lighting.Model._save();
+             Lighting.Model.removeObject(obj.id); Lighting.Model._save();
              if (Lighting.Input) Lighting.Input.selectedObjectId = null;
-             this.refresh();
-             Lighting.Render.draw();
+             this.refresh(); Lighting.Render.draw();
            });
+
+    // ── Seção Redimensionar — APENAS para círculos ─────────────
+    if (obj.shape === 'circle') {
+      mkSep();
+      mkSectionLabel('Redimensionar');
+
+      // Campo: diâmetro da penumbra (que é o total — luz = metade)
+      const resizeDiv = document.createElement('div');
+      resizeDiv.style.cssText = 'padding:4px 10px 8px;';
+
+      const gs = window.VTTGrid?.size || 50;
+
+      // Label
+      const lbl1 = document.createElement('div');
+      lbl1.style.cssText = 'font-size:0.78em;opacity:0.7;margin-bottom:4px;';
+      lbl1.innerText = 'Diâmetro (em quadrados):';
+      resizeDiv.appendChild(lbl1);
+
+      // Explicação
+      const exp = document.createElement('div');
+      exp.style.cssText = 'font-size:0.72em;opacity:0.5;margin-bottom:6px;line-height:1.3;';
+      exp.innerText = 'O valor inserido é o diâmetro da penumbra. A luz plena terá metade desse valor.';
+      resizeDiv.appendChild(exp);
+
+      const inputRow = document.createElement('div');
+      inputRow.style.cssText = 'display:flex;gap:6px;align-items:center;';
+
+      const inp = document.createElement('input');
+      inp.type  = 'number';
+      inp.min   = '1';
+      inp.step  = '0.5';
+      inp.value = obj.penumbraDiameter || 8;
+      inp.style.cssText =
+        'flex:1;padding:5px;background:#1a1a1a;color:white;border:1px solid #555;' +
+        'border-radius:4px;font-size:0.9em;';
+      inp.placeholder = 'Diâmetro penumbra';
+
+      const applyBtn = document.createElement('button');
+      applyBtn.innerText = 'Aplicar';
+      applyBtn.style.cssText =
+        'padding:5px 10px;background:#2a5a2a;color:white;border:1px solid #3a7a3a;' +
+        'border-radius:4px;cursor:pointer;font-size:0.85em;white-space:nowrap;';
+      applyBtn.onclick = () => {
+        const val = parseFloat(inp.value);
+        if (isNaN(val) || val < 0.5) return;
+        const penumD = val;
+        const lightD = val / 2;
+        Lighting.Model.updateObject(obj.id, {
+          penumbraDiameter: penumD,
+          lightDiameter:    lightD,
+        });
+        Lighting.Model._save();
+        this.refresh();
+        Lighting.Render.draw();
+        menu.remove();
+      };
+
+      // Preview das medidas atuais
+      const preview = document.createElement('div');
+      preview.style.cssText = 'font-size:0.72em;opacity:0.6;margin-top:4px;';
+      const updatePreview = () => {
+        const val  = parseFloat(inp.value) || 0;
+        const penD = val.toFixed(1);
+        const litD = (val / 2).toFixed(1);
+        const penPx = ((val / 2) * gs).toFixed(0);
+        const litPx = ((val / 4) * gs).toFixed(0);
+        preview.innerText =
+          `Penumbra: ⌀${penD} sq (${penPx}px) · Luz: ⌀${litD} sq (${litPx}px)`;
+      };
+      updatePreview();
+      inp.addEventListener('input', updatePreview);
+
+      inputRow.appendChild(inp);
+      inputRow.appendChild(applyBtn);
+      resizeDiv.appendChild(inputRow);
+      resizeDiv.appendChild(preview);
+      menu.appendChild(resizeDiv);
+    }
 
     document.body.appendChild(menu);
 
+    // Fecha ao clicar fora
     setTimeout(() => {
-      const close = e => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
+      const close = e => {
+        if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('mousedown', close); }
+      };
       document.addEventListener('mousedown', close);
     }, 0);
   },
