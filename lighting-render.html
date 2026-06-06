@@ -166,15 +166,19 @@ Lighting.Render = {
       ctx.rotate((obj.rotation || 0) * Math.PI / 180);
       ctx.translate(-cx, -cy);
     }
-    ctx.beginPath();
-    if (obj.shape === 'rect') {
-      ctx.rect(obj.x, obj.y, obj.width || 100, obj.height || 100);
-    } else if (obj.shape === 'polygon' && obj.points && obj.points.length >= 3) {
-      ctx.moveTo(obj.points[0].x, obj.points[0].y);
-      for (let i = 1; i < obj.points.length; i++) ctx.lineTo(obj.points[i].x, obj.points[i].y);
-      ctx.closePath();
-    }
-    ctx.fill();
+     ctx.beginPath();
+  if (obj.shape === 'rect') {
+    ctx.rect(obj.x, obj.y, obj.width || 100, obj.height || 100);
+  } else if (obj.shape === 'circle') {
+    const gs = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
+    const r  = ((obj.penumbraDiameter || obj.lightDiameter || 4) / 2) * gs;
+    ctx.arc(obj.x, obj.y, r, 0, Math.PI * 2);
+  } else if (obj.shape === 'polygon' && obj.points && obj.points.length >= 3) {
+    ctx.moveTo(obj.points[0].x, obj.points[0].y);
+    for (let i = 1; i < obj.points.length; i++) ctx.lineTo(obj.points[i].x, obj.points[i].y);
+    ctx.closePath();
+  }
+  ctx.fill();
     ctx.restore();
   },
 
