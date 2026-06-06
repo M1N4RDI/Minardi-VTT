@@ -9,6 +9,7 @@ Lighting.UI = {
   sidebar: null,
   toolButtons: {},
   _enableBtn: null,
+  _coverBtn: null,
 
   init() {
     if (this.initialized) return;
@@ -35,7 +36,7 @@ Lighting.UI = {
     title.innerText = 'Iluminação';
     cat.appendChild(title);
 
-    // ---- Botão de MODO (ativa o mouse para iluminação) ----
+    // ── Botão de MODO (ativa o mouse para edição) ──────────────
     const modeBtn = document.createElement('button');
     modeBtn.id = 'lighting-mode-btn';
     modeBtn.className = 'mode-btn mode-lighting';
@@ -45,37 +46,68 @@ Lighting.UI = {
     VTTMode._categoryIds.lighting = 'cat-lighting';
     cat.appendChild(modeBtn);
 
-    // ---- Toggle de iluminação (liga/desliga o overlay escuro) ----
+    // ── Toggle fog on/off ──────────────────────────────────────
     const enableBtn = document.createElement('button');
     enableBtn.id = 'lighting-enable-btn';
     enableBtn.className = 'btn-full';
     enableBtn.style.marginTop = '6px';
-    enableBtn.style.background = Lighting.Model.enabled ? '#7a3a00' : '#333';
-    enableBtn.textContent = Lighting.Model.enabled ? '🌑 Iluminação: ON' : '☀ Iluminação: OFF';
-    enableBtn.title = 'Liga/desliga o fog of war sem sair do modo de edição';
+    const _syncEnableBtn = () => {
+      enableBtn.textContent  = Lighting.Model.enabled ? '🌑 Fog: LIGADO' : '☀ Fog: DESLIGADO';
+      enableBtn.style.background = Lighting.Model.enabled ? '#5a3a00' : '#333';
+    };
+    _syncEnableBtn();
+    enableBtn.title  = 'Liga/desliga o fog of war (escuridão)';
     enableBtn.onclick = () => {
       Lighting.Model.enabled = !Lighting.Model.enabled;
       Lighting.Model._save();
-      enableBtn.textContent = Lighting.Model.enabled ? '🌑 Iluminação: ON' : '☀ Iluminação: OFF';
-      enableBtn.style.background = Lighting.Model.enabled ? '#7a3a00' : '#333';
+      _syncEnableBtn();
       Lighting.Render.draw();
     };
     this._enableBtn = enableBtn;
     cat.appendChild(enableBtn);
 
-    // ---- masterReveal ----
-    const revealBtn = this._createActionButton('👁 Mostrar Tudo (Mestre)', () => {
+    // ── Toggle cobertura total (dark 99999×99999) ──────────────
+    const coverBtn = document.createElement('button');
+    coverBtn.className = 'btn-full';
+    coverBtn.style.marginTop = '4px';
+    const _syncCoverBtn = () => {
+      const active = Lighting.Model.hasTotalCover();
+      coverBtn.textContent      = active ? '☀ Remover Cobertura Total' : '🌑 Cobrir Mapa Todo';
+      coverBtn.style.background = active ? '#1a3a5c' : '';
+    };
+    _syncCoverBtn();
+    coverBtn.onclick = () => {
+      Lighting.Model.toggleTotalCover();
+      Lighting.Model._save();
+      _syncCoverBtn();
+      this.refresh();
+      Lighting.Render.draw();
+    };
+    this._coverBtn = coverBtn;
+    cat.appendChild(coverBtn);
+
+    // ── masterReveal ───────────────────────────────────────────
+    const revealBtn = document.createElement('button');
+    revealBtn.className = 'btn-full';
+    revealBtn.style.marginTop = '4px';
+    const _syncRevealBtn = () => {
+      revealBtn.textContent      = Lighting.Model.masterReveal ? '👁 Revelar: ON' : '👁 Revelar: OFF';
+      revealBtn.style.background = Lighting.Model.masterReveal ? '#1a3a5c' : '';
+    };
+    _syncRevealBtn();
+    revealBtn.title  = 'Mestre vê tudo — jogadores continuam com o fog normal';
+    revealBtn.onclick = () => {
       Lighting.Model.masterReveal = !Lighting.Model.masterReveal;
       Lighting.Model._save();
-      revealBtn.style.background = Lighting.Model.masterReveal ? '#1a3a5c' : '';
+      _syncRevealBtn();
       Lighting.Render.draw();
-    });
-    revealBtn.style.background = Lighting.Model.masterReveal ? '#1a3a5c' : '';
+    };
     cat.appendChild(revealBtn);
 
-    // ---- FERRAMENTAS ----
+    // ── FERRAMENTAS ────────────────────────────────────────────
     const toolsLabel = document.createElement('div');
-    toolsLabel.style.cssText = 'font-size:0.78em;font-weight:bold;margin:12px 0 6px;opacity:0.8;text-transform:uppercase;';
+    toolsLabel.style.cssText =
+      'font-size:0.78em;font-weight:bold;margin:12px 0 6px;opacity:0.8;text-transform:uppercase;';
     toolsLabel.innerText = 'Ferramentas';
     cat.appendChild(toolsLabel);
 
@@ -83,16 +115,16 @@ Lighting.UI = {
     toolGrid.style.cssText = 'display:grid;grid-template-columns:repeat(5,1fr);gap:5px;';
 
     const tools = [
-      { id: 'select',  icon: '🖱',  title: 'Selecionar' },
-      { id: 'rect',    icon: '⬜', title: 'Retângulo' },
-      { id: 'circle',  icon: '⚪', title: 'Círculo' },
-      { id: 'polygon', icon: '⬡',  title: 'Polígono' },
-      { id: 'wall',    icon: '🚧', title: 'Parede' },
+      { id: 'select',  icon: '🖱',  title: 'Selecionar'   },
+      { id: 'rect',    icon: '⬜', title: 'Retângulo'    },
+      { id: 'circle',  icon: '⚪', title: 'Círculo'      },
+      { id: 'polygon', icon: '⬡',  title: 'Polígono'     },
+      { id: 'wall',    icon: '🚧', title: 'Parede'       },
     ];
 
     tools.forEach(tool => {
       const btn = document.createElement('button');
-      btn.title = tool.title;
+      btn.title    = tool.title;
       btn.innerHTML = tool.icon;
       btn.style.cssText =
         'padding:10px;font-size:1.1em;border:2px solid transparent;border-radius:6px;' +
@@ -107,73 +139,10 @@ Lighting.UI = {
     });
     cat.appendChild(toolGrid);
 
-    // ---- AÇÕES ----
-    const actionsLabel = document.createElement('div');
-    actionsLabel.style.cssText = 'font-size:0.78em;font-weight:bold;margin:12px 0 6px;opacity:0.8;text-transform:uppercase;';
-    actionsLabel.innerText = 'Ações Rápidas';
-    cat.appendChild(actionsLabel);
-
-window.LightPlugin = window.LightPlugin || {};
-
-(function() {
-  function atualizarTextoBotaoCoberturaTotal() {
-    var botao = document.getElementById('btnCoverMap') ||
-      document.getElementById('btnCobrirMapaTodo') ||
-      document.querySelector('[data-action="cover-map"]');
-
-    if (!botao) {
-      return;
-    }
-
-    var ativo = false;
-
-    if (LightPlugin.Model && typeof LightPlugin.Model.hasTotalCover === 'function') {
-      ativo = LightPlugin.Model.hasTotalCover();
-    }
-
-    botao.textContent = ativo ? 'Iluminar Mapa Todo' : 'Cobrir Mapa Todo';
-    botao.classList.toggle('active', ativo);
-    botao.classList.toggle('ativo', ativo);
-  }
-
-  function configurarBotaoCoberturaTotal() {
-    var botao = document.getElementById('btnCoverMap') ||
-      document.getElementById('btnCobrirMapaTodo') ||
-      document.querySelector('[data-action="cover-map"]');
-
-    if (!botao) {
-      return;
-    }
-
-    botao.addEventListener('click', function() {
-      if (!LightPlugin.Model || typeof LightPlugin.Model.toggleTotalCover !== 'function') {
-        console.warn('LightPlugin.Model.toggleTotalCover não está disponível.');
-        return;
-      }
-
-      LightPlugin.Model.toggleTotalCover();
-      atualizarTextoBotaoCoberturaTotal();
-
-      if (LightPlugin.Render && typeof LightPlugin.Render.draw === 'function') {
-        LightPlugin.Render.draw();
-      }
-    });
-
-    atualizarTextoBotaoCoberturaTotal();
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', configurarBotaoCoberturaTotal);
-  } else {
-    configurarBotaoCoberturaTotal();
-  }
-
-  LightPlugin.updateTotalCoverButton = atualizarTextoBotaoCoberturaTotal;
-})();
-
-    // ---- LISTA DE OBJETOS ----
+    // ── LISTA DE OBJETOS ───────────────────────────────────────
     const listLabel = document.createElement('div');
-    listLabel.style.cssText = 'font-size:0.78em;font-weight:bold;margin:12px 0 6px;opacity:0.8;text-transform:uppercase;';
+    listLabel.style.cssText =
+      'font-size:0.78em;font-weight:bold;margin:12px 0 4px;opacity:0.8;text-transform:uppercase;';
     listLabel.innerText = 'Objetos';
     cat.appendChild(listLabel);
 
@@ -182,14 +151,15 @@ window.LightPlugin = window.LightPlugin || {};
     objectList.style.cssText = 'max-height:180px;overflow-y:auto;font-size:0.85em;';
     cat.appendChild(objectList);
 
-    // ---- PROPRIEDADES ----
+    // ── PROPRIEDADES ───────────────────────────────────────────
     const propsLabel = document.createElement('div');
-    propsLabel.style.cssText = 'font-size:0.78em;font-weight:bold;margin:12px 0 6px;opacity:0.8;text-transform:uppercase;';
+    propsLabel.style.cssText =
+      'font-size:0.78em;font-weight:bold;margin:12px 0 4px;opacity:0.8;text-transform:uppercase;';
     propsLabel.innerText = 'Propriedades';
     cat.appendChild(propsLabel);
 
     const propPanel = document.createElement('div');
-    propPanel.id = 'lighting-props-panel';
+    propPanel.id    = 'lighting-props-panel';
     propPanel.style.fontSize = '0.85em';
     cat.appendChild(propPanel);
 
@@ -201,25 +171,12 @@ window.LightPlugin = window.LightPlugin || {};
     setTimeout(() => { if (window.VTTMode) VTTMode.setMode(VTTMode.active); }, 100);
   },
 
-  _createActionButton(label, action) {
-    const btn = document.createElement('button');
-    btn.className = 'btn-full';
-    btn.innerText = label;
-    btn.addEventListener('click', action);
-    return btn;
-  },
-
   _updateToolButtons() {
     const active = Lighting.Input ? Lighting.Input.activeTool : 'select';
     Object.keys(this.toolButtons).forEach(key => {
       const btn = this.toolButtons[key];
-      if (key === active) {
-        btn.style.background   = 'rgba(150,200,255,0.5)';
-        btn.style.borderColor  = 'rgba(200,230,255,0.8)';
-      } else {
-        btn.style.background   = 'rgba(100,100,100,0.3)';
-        btn.style.borderColor  = 'transparent';
-      }
+      btn.style.background  = key === active ? 'rgba(150,200,255,0.5)' : 'rgba(100,100,100,0.3)';
+      btn.style.borderColor = key === active ? 'rgba(200,230,255,0.8)' : 'transparent';
     });
   },
 
@@ -227,10 +184,15 @@ window.LightPlugin = window.LightPlugin || {};
     this._updateToolButtons();
     this._renderObjectList();
     this._renderProperties();
-    // Sincroniza botão de enable
+    // Sincroniza botões de estado
     if (this._enableBtn) {
-      this._enableBtn.textContent = Lighting.Model.enabled ? '🌑 Iluminação: ON' : '☀ Iluminação: OFF';
-      this._enableBtn.style.background = Lighting.Model.enabled ? '#7a3a00' : '#333';
+      this._enableBtn.textContent  = Lighting.Model.enabled ? '🌑 Fog: LIGADO' : '☀ Fog: DESLIGADO';
+      this._enableBtn.style.background = Lighting.Model.enabled ? '#5a3a00' : '#333';
+    }
+    if (this._coverBtn) {
+      const active = Lighting.Model.hasTotalCover();
+      this._coverBtn.textContent      = active ? '☀ Remover Cobertura Total' : '🌑 Cobrir Mapa Todo';
+      this._coverBtn.style.background = active ? '#1a3a5c' : '';
     }
   },
 
@@ -239,16 +201,17 @@ window.LightPlugin = window.LightPlugin || {};
     if (!listEl) return;
     listEl.innerHTML = '';
 
-    const darkObjs  = Lighting.Model.objects.filter(o => o.mode === 'dark');
+    // Filtra a cobertura total da lista (gerenciada pelo botão dedicado)
+    const darkObjs  = Lighting.Model.objects.filter(o => o.mode === 'dark'  && !o._totalCover);
     const lightObjs = Lighting.Model.objects.filter(o => o.mode === 'light');
 
-    if (darkObjs.length)  this._createListGroup(listEl, '▼ Áreas Escuras',    darkObjs);
-    if (lightObjs.length) this._createListGroup(listEl, '▼ Áreas Iluminadas', lightObjs);
-    if (Lighting.Model.walls.length) this._createWallGroup(listEl);
+    if (darkObjs.length)              this._createListGroup(listEl, '▼ Escuridão', darkObjs);
+    if (lightObjs.length)             this._createListGroup(listEl, '▼ Luz',       lightObjs);
+    if (Lighting.Model.walls.length)  this._createWallGroup(listEl);
 
     if (!darkObjs.length && !lightObjs.length && !Lighting.Model.walls.length) {
       const empty = document.createElement('div');
-      empty.style.cssText = 'opacity:0.6;padding:6px;';
+      empty.style.cssText = 'opacity:0.55;padding:6px;font-size:0.85em;';
       empty.innerText = 'Nenhum objeto. Use as ferramentas acima.';
       listEl.appendChild(empty);
     }
@@ -259,20 +222,40 @@ window.LightPlugin = window.LightPlugin || {};
     group.style.marginBottom = '6px';
 
     const header = document.createElement('div');
-    header.style.cssText = 'font-weight:bold;font-size:0.8em;margin-bottom:3px;opacity:0.8;';
+    header.style.cssText = 'font-weight:bold;font-size:0.78em;margin-bottom:3px;opacity:0.7;';
     header.innerText = label;
     group.appendChild(header);
 
     objects.forEach(obj => {
       const item = document.createElement('div');
+      const sel  = Lighting.Input && Lighting.Input.selectedObjectId === obj.id;
       item.style.cssText =
-        'padding:5px 6px;border-radius:4px;cursor:pointer;font-size:0.85em;' +
-        (Lighting.Input && Lighting.Input.selectedObjectId === obj.id
-          ? 'background:rgba(100,150,200,0.35);'
-          : 'background:transparent;');
-      item.innerText = obj.name;
+        'padding:5px 7px;border-radius:4px;cursor:pointer;font-size:0.85em;' +
+        'display:flex;justify-content:space-between;align-items:center;' +
+        (sel ? 'background:rgba(100,150,200,0.35);' : '');
+      const nameSpan = document.createElement('span');
+      nameSpan.innerText = (obj.locked ? '🔒 ' : '') + obj.name;
+      item.appendChild(nameSpan);
+
+      // Botão rápido de excluir na lista
+      const delBtn = document.createElement('button');
+      delBtn.innerText = '✕';
+      delBtn.style.cssText =
+        'background:none;border:none;color:rgba(200,80,80,0.7);cursor:pointer;' +
+        'padding:0 3px;font-size:0.9em;';
+      delBtn.title = 'Excluir';
+      delBtn.onclick = e => {
+        e.stopPropagation();
+        Lighting.Model.removeObject(obj.id);
+        Lighting.Model._save();
+        if (Lighting.Input) Lighting.Input.selectedObjectId = null;
+        this.refresh();
+        Lighting.Render.draw();
+      };
+      item.appendChild(delBtn);
+
       item.addEventListener('click', () => {
-        Lighting.Input.selectedObjectId = obj.id;
+        if (Lighting.Input) Lighting.Input.selectedObjectId = obj.id;
         this.refresh();
         Lighting.Render.draw();
       });
@@ -291,17 +274,23 @@ window.LightPlugin = window.LightPlugin || {};
     group.style.marginBottom = '6px';
 
     const header = document.createElement('div');
-    header.style.cssText = 'font-weight:bold;font-size:0.8em;margin-bottom:3px;opacity:0.8;';
+    header.style.cssText = 'font-weight:bold;font-size:0.78em;margin-bottom:3px;opacity:0.7;';
     header.innerText = '▼ Paredes';
     group.appendChild(header);
 
     Lighting.Model.walls.forEach((wall, idx) => {
       const item = document.createElement('div');
-      item.style.cssText = 'padding:5px 6px;border-radius:4px;font-size:0.85em;display:flex;justify-content:space-between;align-items:center;';
-      item.innerHTML = `<span>Parede ${idx + 1}</span>`;
+      item.style.cssText =
+        'padding:5px 7px;border-radius:4px;font-size:0.85em;' +
+        'display:flex;justify-content:space-between;align-items:center;';
+      const nameSpan = document.createElement('span');
+      nameSpan.innerText = `Parede ${idx + 1}`;
+      item.appendChild(nameSpan);
+
       const del = document.createElement('button');
       del.innerText = '✕';
-      del.style.cssText = 'background:none;border:none;color:#c0392b;cursor:pointer;padding:0 4px;';
+      del.style.cssText =
+        'background:none;border:none;color:rgba(200,80,80,0.7);cursor:pointer;padding:0 3px;';
       del.onclick = () => {
         Lighting.Model.removeWall(wall.id);
         Lighting.Model._save();
@@ -324,8 +313,8 @@ window.LightPlugin = window.LightPlugin || {};
     const selectedId = Lighting.Input ? Lighting.Input.selectedObjectId : null;
     if (!selectedId) {
       const nosel = document.createElement('div');
-      nosel.style.cssText = 'opacity:0.6;padding:4px;';
-      nosel.innerText = 'Selecione um objeto.';
+      nosel.style.cssText = 'opacity:0.55;padding:4px;font-size:0.85em;';
+      nosel.innerText = 'Clique em um objeto para editar.';
       propsEl.appendChild(nosel);
       return;
     }
@@ -339,20 +328,17 @@ window.LightPlugin = window.LightPlugin || {};
       this._renderObjectList();
     });
 
-    // Tipo e forma (readonly)
     const info = document.createElement('div');
-    info.style.cssText = 'font-size:0.8em;opacity:0.7;margin-bottom:8px;';
-    info.innerText = `${obj.mode === 'dark' ? 'Escuridão' : 'Luz'} · ${({ rect: 'Retângulo', circle: 'Círculo', polygon: 'Polígono' })[obj.shape] || obj.shape}`;
+    info.style.cssText = 'font-size:0.78em;opacity:0.65;margin-bottom:8px;';
+    const shapeLabel = { rect: 'Retângulo', circle: 'Círculo', polygon: 'Polígono' };
+    info.innerText = `${obj.mode === 'dark' ? 'Escuridão' : 'Luz'} · ${shapeLabel[obj.shape] || obj.shape}`;
     propsEl.appendChild(info);
 
     if (obj.mode === 'light') {
-      this._createPropField(propsEl, 'Luminosidade (grid)', obj.luminosity || 6, val => {
-        Lighting.Model.updateObject(obj.id, { luminosity: Number(val) || 1 });
-        Lighting.Model._save(); Lighting.Render.draw();
-      }, 'number');
       this._createPropField(propsEl, 'Penumbra (grid)', obj.penumbra || 4, val => {
-        Lighting.Model.updateObject(obj.id, { penumbra: Number(val) || 0 });
-        Lighting.Model._save(); Lighting.Render.draw();
+        Lighting.Model.updateObject(obj.id, { penumbra: Math.max(0, Number(val) || 0) });
+        Lighting.Model._save();
+        Lighting.Render.draw();
       }, 'number');
     }
 
@@ -360,27 +346,48 @@ window.LightPlugin = window.LightPlugin || {};
     buttonRow.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:8px;';
 
     const toggleBtn = document.createElement('button');
-    toggleBtn.className = 'btn-full';
+    toggleBtn.className  = 'btn-full';
     toggleBtn.style.fontSize = '0.72em';
-    toggleBtn.innerText = obj.mode === 'dark' ? 'Iluminar' : 'Escurecer';
-    toggleBtn.onclick = () => { Lighting.Model.toggleObjectMode(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); };
+    toggleBtn.innerText  = obj.mode === 'dark' ? 'Tornar Luz' : 'Tornar Escuridão';
+    toggleBtn.onclick    = () => {
+      Lighting.Model.toggleObjectMode(obj.id);
+      Lighting.Model._save();
+      this.refresh();
+      Lighting.Render.draw();
+    };
     buttonRow.appendChild(toggleBtn);
 
     const dupBtn = document.createElement('button');
-    dupBtn.className = 'btn-full';
+    dupBtn.className  = 'btn-full';
     dupBtn.style.fontSize = '0.72em';
-    dupBtn.innerText = 'Duplicar';
-    dupBtn.onclick = () => { Lighting.Model.duplicateObject(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); };
+    dupBtn.innerText  = 'Duplicar';
+    dupBtn.onclick    = () => {
+      Lighting.Model.duplicateObject(obj.id);
+      Lighting.Model._save();
+      this.refresh();
+      Lighting.Render.draw();
+    };
     buttonRow.appendChild(dupBtn);
 
+    const lockBtn = document.createElement('button');
+    lockBtn.className  = 'btn-full';
+    lockBtn.style.fontSize = '0.72em';
+    lockBtn.innerText  = obj.locked ? '🔓 Desbloquear' : '🔒 Bloquear';
+    lockBtn.onclick    = () => {
+      Lighting.Model.toggleObjectLocked(obj.id);
+      Lighting.Model._save();
+      this.refresh();
+    };
+    buttonRow.appendChild(lockBtn);
+
     const delBtn = document.createElement('button');
-    delBtn.className = 'btn-full';
-    delBtn.style.cssText = 'font-size:0.72em;grid-column:1/-1;background:#7a2a2a;';
-    delBtn.innerText = 'Excluir';
-    delBtn.onclick = () => {
+    delBtn.className  = 'btn-full';
+    delBtn.style.cssText = 'font-size:0.72em;background:#7a2a2a;';
+    delBtn.innerText  = '🗑 Excluir';
+    delBtn.onclick    = () => {
       Lighting.Model.removeObject(obj.id);
       Lighting.Model._save();
-      Lighting.Input.selectedObjectId = null;
+      if (Lighting.Input) Lighting.Input.selectedObjectId = null;
       this.refresh();
       Lighting.Render.draw();
     };
@@ -390,13 +397,13 @@ window.LightPlugin = window.LightPlugin || {};
   },
 
   _createPropField(parent, label, value, onChange, type = 'text') {
-    const row = document.createElement('div');
+    const row   = document.createElement('div');
     row.style.marginBottom = '7px';
-    const lbl = document.createElement('label');
+    const lbl   = document.createElement('label');
     lbl.innerText = label;
     row.appendChild(lbl);
     const input = document.createElement('input');
-    input.type = type;
+    input.type  = type;
     input.value = value;
     input.addEventListener('change', e => onChange(e.target.value));
     row.appendChild(input);
@@ -407,7 +414,6 @@ window.LightPlugin = window.LightPlugin || {};
     const obj = Lighting.Model.getObject(objId);
     if (!obj) return;
 
-    // Remove menu anterior
     const old = document.getElementById('lighting-ctx-menu');
     if (old) old.remove();
 
@@ -415,40 +421,45 @@ window.LightPlugin = window.LightPlugin || {};
     menu.id = 'lighting-ctx-menu';
     menu.style.cssText =
       `position:fixed;left:${pos.x}px;top:${pos.y}px;` +
-      'background:rgba(28,28,28,0.97);border:1px solid rgba(200,200,200,0.25);' +
-      'border-radius:7px;padding:4px;z-index:10000;font-size:0.85em;min-width:180px;' +
-      'box-shadow:0 4px 14px rgba(0,0,0,0.6);';
+      'background:rgba(24,24,24,0.97);border:1px solid rgba(200,200,200,0.2);' +
+      'border-radius:7px;padding:4px;z-index:20000;min-width:180px;' +
+      'box-shadow:0 4px 16px rgba(0,0,0,0.65);font-size:0.85em;';
 
-    const items = [
-      { icon: '✏️', label: 'Renomear',
-        action: () => { const n = prompt('Novo nome:', obj.name); if (n) { Lighting.Model.updateObject(obj.id, { name: n }); Lighting.Model._save(); this.refresh(); } } },
-      { icon: obj.mode === 'dark' ? '💡' : '🌑',
-        label: obj.mode === 'dark' ? 'Iluminar' : 'Escurecer',
-        action: () => { Lighting.Model.toggleObjectMode(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); } },
-      { icon: obj.locked ? '🔓' : '🔒',
-        label: obj.locked ? 'Desbloquear' : 'Bloquear',
-        action: () => { Lighting.Model.toggleObjectLocked(obj.id); Lighting.Model._save(); this.refresh(); } },
-      { icon: '⧉', label: 'Duplicar',
-        action: () => { Lighting.Model.duplicateObject(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); } },
-      { icon: '🗑', label: 'Excluir',
-        action: () => { Lighting.Model.removeObject(obj.id); Lighting.Model._save(); Lighting.Input.selectedObjectId = null; this.refresh(); Lighting.Render.draw(); } },
-    ];
-
-    items.forEach(item => {
+    const mkItem = (icon, label, action) => {
       const btn = document.createElement('button');
       btn.style.cssText =
         'display:block;width:100%;background:transparent;border:none;color:#ccc;' +
-        'padding:8px 10px;text-align:left;cursor:pointer;border-radius:5px;font-size:0.9em;';
-      btn.innerHTML = `${item.icon} ${item.label}`;
+        'padding:8px 10px;text-align:left;cursor:pointer;border-radius:5px;';
+      btn.innerHTML = `${icon} ${label}`;
       btn.onmouseover = () => { btn.style.background = 'rgba(100,100,100,0.3)'; };
       btn.onmouseout  = () => { btn.style.background = 'transparent'; };
-      btn.onclick = () => { item.action(); menu.remove(); };
+      btn.onclick     = () => { action(); menu.remove(); };
       menu.appendChild(btn);
+    };
+
+    mkItem('✏️', 'Renomear', () => {
+      const n = prompt('Novo nome:', obj.name);
+      if (n) { Lighting.Model.updateObject(obj.id, { name: n }); Lighting.Model._save(); this.refresh(); }
     });
+    mkItem(obj.mode === 'dark' ? '💡' : '🌑',
+           obj.mode === 'dark' ? 'Tornar Luz' : 'Tornar Escuridão',
+           () => { Lighting.Model.toggleObjectMode(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); });
+    mkItem(obj.locked ? '🔓' : '🔒',
+           obj.locked ? 'Desbloquear' : 'Bloquear',
+           () => { Lighting.Model.toggleObjectLocked(obj.id); Lighting.Model._save(); this.refresh(); });
+    mkItem('⧉', 'Duplicar',
+           () => { Lighting.Model.duplicateObject(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); });
+    mkItem('🗑', 'Excluir',
+           () => {
+             Lighting.Model.removeObject(obj.id);
+             Lighting.Model._save();
+             if (Lighting.Input) Lighting.Input.selectedObjectId = null;
+             this.refresh();
+             Lighting.Render.draw();
+           });
 
     document.body.appendChild(menu);
 
-    // Fecha ao clicar fora — com setTimeout para não capturar o clique que abriu
     setTimeout(() => {
       const close = e => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
       document.addEventListener('mousedown', close);
