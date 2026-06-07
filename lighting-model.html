@@ -99,6 +99,56 @@ Lighting.Model = {
     return true;
   },
 
+// Converte um objeto de área em segmentos de parede
+convertToWalls(id) {
+  const obj = this.getObject(id);
+  if (!obj) return;
+
+  const segments = [];
+
+  if (obj.shape === 'rect') {
+    const { x, y } = obj;
+    const w = obj.width  || 100;
+    const h = obj.height || 100;
+    const rot = (obj.rotation || 0) * Math.PI / 180;
+    const cx  = x + w/2, cy = y + h/2;
+    const corners = [
+      { x, y }, { x: x+w, y }, { x: x+w, y: y+h }, { x, y: y+h }
+    ].map(p => {
+      const dx = p.x - cx, dy = p.y - cy;
+      return {
+        x: cx + dx * Math.cos(rot) - dy * Math.sin(rot),
+        y: cy + dx * Math.sin(rot) + dy * Math.cos(rot),
+      };
+    });
+    for (let i = 0; i < 4; i++) {
+      segments.push([corners[i], corners[(i+1) % 4]]);
+    }
+
+  } else if (obj.shape === 'circle') {
+    const gs = window.VTTGrid?.size || this.gridSize || 50;
+    const r  = ((obj.penumbraDiameter || obj.lightDiameter || 4) / 2) * gs;
+    const N  = 16; // 16 segmentos para aproximar o círculo
+    for (let i = 0; i < N; i++) {
+      const a1 = (i / N) * Math.PI * 2;
+      const a2 = ((i+1) / N) * Math.PI * 2;
+      segments.push([
+        { x: obj.x + Math.cos(a1) * r, y: obj.y + Math.sin(a1) * r },
+        { x: obj.x + Math.cos(a2) * r, y: obj.y + Math.sin(a2) * r },
+      ]);
+    }
+
+  } else if (obj.shape === 'polygon' && obj.points && obj.points.length >= 3) {
+    const pts = obj.points;
+    for (let i = 0; i < pts.length; i++) {
+      segments.push([pts[i], pts[(i+1) % pts.length]]);
+    }
+  }
+
+  segments.forEach(([p1, p2]) => this.addWall(p1, p2));
+  this.removeObject(id);
+},
+
   _save() {
     try {
       localStorage.setItem('lighting_state_v3', JSON.stringify({

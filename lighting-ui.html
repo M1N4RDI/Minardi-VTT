@@ -507,6 +507,14 @@ if (obj.shape === 'circle') {
            obj.locked ? 'Desbloquear' : 'Bloquear',
            () => { Lighting.Model.toggleObjectLocked(obj.id); Lighting.Model._save(); this.refresh(); });
     mkItem('⧉', 'Duplicar',
+    mkItem('🧱', 'Converter em Parede', () => {
+  Lighting.Model.convertToWalls(obj.id);
+  Lighting.Model._save();
+  if (Lighting.Input) Lighting.Input.selectedObjectId = null;
+  this.refresh();
+  Lighting.Render.buildSpatialIndex();
+  Lighting.Render.draw();
+});
            () => { Lighting.Model.duplicateObject(obj.id); Lighting.Model._save(); this.refresh(); Lighting.Render.draw(); });
     mkItem('🗑', 'Excluir',
            () => {

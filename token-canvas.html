@@ -123,18 +123,20 @@ TokenPlugin.Canvas = {
                     }
 
                     // Indicador: token possui luz vinculada?
-                    if (window.Lighting && Lighting.Model && (Lighting.Model.objects || []).some(ll => ll.tokenId === t.id)) {
-                        ctx.beginPath();
-                        ctx.beginPath();
-ctx.fillStyle = 'rgba(255,220,60,0.85)';
-ctx.arc(centerX, centerY, 10, 0, Math.PI * 2);
-ctx.fill();
-ctx.fillStyle = '#fff';
-ctx.font = '13px sans-serif';
-ctx.textAlign = 'center';
-ctx.textBaseline = 'middle';
-ctx.fillText('💡', centerX, centerY);
-                    }
+                    if (window.Lighting && Lighting.Model &&
+    (Lighting.Model.objects || []).some(ll => ll.tokenId === t.id)) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.fillStyle = 'rgba(255,220,60,0.75)';
+  ctx.arc(centerX, centerY, Math.max(12, radius * 0.35), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.font = `${Math.max(14, Math.round(radius * 0.45))}px sans-serif`;
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('💡', centerX, centerY);
+  ctx.restore();
+}
                 }
 
             } else {
