@@ -297,66 +297,18 @@ _drawWalls(ctx) {
     return [];
   },
 
-
   getRotateHandlePos(obj) {
-
-  if (obj.shape === 'rect') {
-
-    const rot =
-      (obj.rotation || 0) *
-      Math.PI / 180;
-
-    const rcx =
-      obj.x +
-      (obj.width || 100) / 2;
-
-    const rcy =
-      obj.y +
-      (obj.height || 100) / 2;
-
-    const dx = 0;
-    const dy =
-      -(obj.height || 100) / 2 - 22;
-
+    if (obj.shape !== 'rect') return null;
+    const rot = (obj.rotation || 0) * Math.PI / 180;
+    const rcx = obj.x + (obj.width  || 100) / 2;
+    const rcy = obj.y + (obj.height || 100) / 2;
+    // Alça 22px acima do centro superior, rotacionada
+    const dx = 0, dy = -(obj.height || 100) / 2 - 22;
     return {
-      x:
-        rcx +
-        dx * Math.cos(rot) -
-        dy * Math.sin(rot),
-
-      y:
-        rcy +
-        dx * Math.sin(rot) +
-        dy * Math.cos(rot)
+      x: rcx + dx * Math.cos(rot) - dy * Math.sin(rot),
+      y: rcy + dx * Math.sin(rot) + dy * Math.cos(rot),
     };
-  }
-
-  if (
-    obj.shape === 'polygon' &&
-    obj.points &&
-    obj.points.length >= 3
-  ) {
-
-    let minY = Infinity;
-
-    obj.points.forEach(p => {
-      minY = Math.min(minY, p.y);
-    });
-
-    const cx =
-      obj.points.reduce(
-        (s,p)=>s+p.x,
-        0
-      ) / obj.points.length;
-
-    return {
-      x: cx,
-      y: minY - 22
-    };
-  }
-
-  return null;
-}
+  },
 
   _drawHandles(ctx, obj) {
     const gs = window.VTTGrid?.size || 50;
@@ -430,12 +382,8 @@ _drawWalls(ctx) {
         ctx.setLineDash([]);
         if (!obj.locked) {
           this._drawHandles(ctx, obj);
-         if (
-  obj.shape === 'rect' ||
-  obj.shape === 'polygon'
-) {
-  this._drawRotateHandle(ctx, obj);
-}
+          if (obj.shape === 'rect') this._drawRotateHandle(ctx, obj);
+        }
       }
     }
 

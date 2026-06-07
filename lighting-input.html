@@ -24,6 +24,17 @@ Lighting.Input = {
   // }
 
 // Calcula centroide de um polígono
+_getCenter(obj) {
+  if (obj.shape === 'polygon' && obj.points?.length) {
+    return this._centroid(obj.points);
+  }
+
+  return {
+    x: obj.x + (obj.width || 100) / 2,
+    y: obj.y + (obj.height || 100) / 2
+  };
+},
+
 _centroid(points) {
   let cx = 0, cy = 0;
   points.forEach(p => { cx += p.x; cy += p.y; });
@@ -31,12 +42,6 @@ _centroid(points) {
 },
 
 // Translada todos os pontos de um polígono
-_translatePolygon(objId, dx, dy) {
-  const obj = Lighting.Model.getObject(objId);
-  if (!obj || obj.shape !== 'polygon') return;
-  const newPoints = obj.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
-  Lighting.Model.updateObject(objId, { points: newPoints });
-},
 
   init() {
     if (this.initialized) return;
@@ -52,7 +57,7 @@ _translatePolygon(objId, dx, dy) {
         canvas.id = 'lighting-interaction-canvas';
         canvas.style.cssText =
           'position:absolute;top:0;left:0;width:100%;height:100%;z-index:1002;' +
-          'pointer-events:none;background:transparent;cursor:default;';
+          'pointer-events:auto;background:transparent;cursor:default;';
         map.appendChild(canvas);
       }
       this.canvas = canvas;
@@ -111,19 +116,22 @@ _onDown(e) {
           rh &&
           Math.hypot(pt.x - rh.x, pt.y - rh.y) <= 10
         ) {
-          const cx = obj.x + (obj.width || 100) / 2;
-          const cy = obj.y + (obj.height || 100) / 2;
+         const center = this._getCenter(obj);
+const cx = center.x;
+const cy = center.y;
 
           this._drag = {
-            type: 'rotate',
-            objId: obj.id,
-            cx,
-            cy,
-            startAngle:
-              Math.atan2(pt.y - cy, pt.x - cx) *
-              180 / Math.PI,
-            startRotation: obj.rotation || 0
-          };
+             type: 'rotate',
+  objId: obj.id,
+  cx,
+  cy,
+  startAngle:
+    Math.atan2(pt.y - cy, pt.x - cx) * 180 / Math.PI,
+  startRotation: obj.rotation || 0,
+  startPoints: obj.shape === 'polygon'
+    ? obj.points.map(p => ({ ...p }))
+    : null
+};
 
           return;
         }
@@ -226,49 +234,6 @@ _onDown(e) {
 
    
 
-      // 2. Alça de resize
-      if (this.selectedObjectId) {
-        const obj = Lighting.Model.getObject(this.selectedObjectId);
-        if (obj && !obj.locked) {
-          const handles = Lighting.Render.getHandles(obj);
-          for (const h of handles) {
-            if (Math.hypot(pt.x - h.x, pt.y - h.y) <= 10) {
-              this._drag = {
-                type: 'handle',
-                objId: obj.id,
-                handleId: h.handleId,
-                startPoint: pt,
-                startObj: { ...obj },
-              };
-              this.canvas.style.cursor = h.cursor;
-              return;
-            }
-          }
-        }
-      }
-
-      // 3. Hit-test objeto
-      const hit = this._hitTest(pt);
-      if (hit) {
-        this.selectedObjectId = hit;
-        const obj = Lighting.Model.getObject(hit);
-        if (obj && !obj.locked) {
-          this._drag = {
-            type: 'move',
-            objId: hit,
-            startPt: pt,
-            startObj: { ...obj },
-          };
-          this.canvas.style.cursor = 'grabbing';
-        }
-      } else {
-        this.selectedObjectId = null;
-        this._drag = null;
-      }
-
-      Lighting.Render.draw();
-      return;
-    
 
     // ─ Ferramenta rect ─────────────────────────────────────────
     if (this.activeTool === 'rect') {
@@ -321,7 +286,7 @@ if (this.activeTool === 'polygon') {
         if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
       }
     }
-  
+},
 
   // ── Mouse Move ───────────────────────────────────────────────
   _onMouseMove(e) {
@@ -357,23 +322,31 @@ if (this.activeTool === 'polygon') {
       Lighting.Model.updateObject(obj.id, { points: newPoints });
 
     } else if (drag.type === 'rotate') {
-      const angle = Math.atan2(pt.y - drag.cy, pt.x - drag.cx) * 180 / Math.PI;
-      const delta = angle - drag.startAngle;
-      if (obj.shape === 'polygon' && drag.startPoints) {
-        const rad = delta * Math.PI / 180;
-        const newPoints = drag.startPoints.map(p => {
-          const dx = p.x - drag.cx, dy = p.y - drag.cy;
-          return {
-            x: drag.cx + dx * Math.cos(rad) - dy * Math.sin(rad),
-            y: drag.cy + dx * Math.sin(rad) + dy * Math.cos(rad),
-          };
-        });
-        Lighting.Model.updateObject(obj.id, { points: newPoints });
-      } else {
-        Lighting.Model.updateObject(obj.id, {
-          rotation: ((drag.startRotation + delta) % 360 + 360) % 360,
-        });
-      }
+  const angle = Math.atan2(pt.y - drag.cy, pt.x - drag.cx) * 180 / Math.PI;
+  const delta = angle - drag.startAngle;
+  const rad = delta * Math.PI / 180;
+
+  // POLÍGONO (usa snapshot sempre)
+  if (drag.startPoints) {
+    const newPoints = drag.startPoints.map(p => {
+      const dx = p.x - drag.cx;
+      const dy = p.y - drag.cy;
+
+      return {
+        x: drag.cx + dx * Math.cos(rad) - dy * Math.sin(rad),
+        y: drag.cy + dx * Math.sin(rad) + dy * Math.cos(rad),
+      };
+    });
+
+    Lighting.Model.updateObject(obj.id, { points: newPoints });
+    Lighting.Render.draw();
+    return;
+  }
+
+  // RECT / outros
+  Lighting.Model.updateObject(obj.id, {
+    rotation: ((drag.startRotation + delta) % 360 + 360) % 360,
+  });
 
     } else if (drag.type === 'handle') {
       this._applyHandle(obj, drag.handleId, pt, drag.startObj);
@@ -400,7 +373,7 @@ if (this.activeTool === 'polygon') {
   }
 
   Lighting.Render.draw();
-}
+},
 
   // ── Mouse Up ─────────────────────────────────────────────────
   _onUp(e) {
@@ -515,7 +488,7 @@ if (this.activeTool === 'polygon') {
 
     if (obj.shape === 'rect') {
       let { x, y, width: w, height: h } = s;
-      const r = s.rotation || 0;
+
 
       // Para rect sem rotação: redimensionamento direto
       // Para rect com rotação: projeta no espaço local (simplificado para rotações pequenas)
@@ -544,9 +517,13 @@ if (this.activeTool === 'polygon') {
       }
       // Alça de mover (centro)
       if (handleId === 'center') {
-        const dx = pt.x - this._drag.startPt.x;
-        const dy = pt.y - this._drag.startPt.y;
-        Lighting.Model.updateObject(obj.id, { x: s.x + dx, y: s.y + dy });
+     const dx = pt.x - s.x;
+const dy = pt.y - s.y;
+
+Lighting.Model.updateObject(obj.id, {
+  x: s.x + dx,
+  y: s.y + dy
+});
       }
     }
   },
