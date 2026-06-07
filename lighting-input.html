@@ -162,20 +162,18 @@ Lighting.Input = {
     }
 
     // ─ Ferramenta polygon ──────────────────────────────────────
-  if (this.activeTool === 'polygon') {
+if (this.activeTool === 'polygon') {
   if (!this.toolState.points) this.toolState.points = [];
   const pts = this.toolState.points;
 
-  // Snap-to-close: se clicar perto do primeiro vértice e já tiver 3+, fecha
   if (pts.length >= 3) {
     const first = pts[0];
-    if (Math.hypot(point.x - first.x, point.y - first.y) < 14) {
-      // Fecha o polígono
+    if (Math.hypot(pt.x - first.x, pt.y - first.y) < 14) {
       Lighting.Model.addObject({
         name: 'Polígono',
         shape: 'polygon',
         x: 0, y: 0,
-        points: pts.slice(), // cópia
+        points: pts.slice(),
       });
       Lighting.Model._save();
       this.toolState = {};
@@ -184,6 +182,12 @@ Lighting.Input = {
       if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
       return;
     }
+  }
+
+  pts.push({ x: pt.x, y: pt.y });
+  Lighting.Render.draw();
+  return;
+}
   }
 
   pts.push({ x: point.x, y: point.y });

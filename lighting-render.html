@@ -231,21 +231,22 @@ Lighting.Render = {
     ctx.restore();
   },
 
-  _drawWalls(ctx) {
-    if (!Lighting.Model.walls || !Lighting.Model.walls.length) return;
-    // paredes: só visíveis no masterReveal, linha sólida
-if (Lighting.Model.masterReveal) {
+_drawWalls(ctx) {
+  if (!Lighting.Model.walls || !Lighting.Model.walls.length) return;
+  if (!Lighting.Model.masterReveal) return;  // invisíveis sem masterReveal
   ctx.save();
-  ctx.strokeStyle = 'rgba(255,80,80,0.75)';
-  ctx.lineWidth = 2;
-  Lighting.Model.walls.forEach((wall) => {
-    if (!wall.visible) return;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.strokeStyle = 'rgba(255,80,80,0.85)';
+  ctx.lineWidth   = 2;
+  // linha SÓLIDA — sem setLineDash
+  Lighting.Model.walls.forEach(w => {
+    if (!w.visible || !w.p1 || !w.p2) return;
     ctx.beginPath();
-    ctx.moveTo(wall.p1.x, wall.p1.y);
-    ctx.lineTo(wall.p2.x, wall.p2.y);
+    ctx.moveTo(w.p1.x, w.p1.y);
+    ctx.lineTo(w.p2.x, w.p2.y);
     ctx.stroke();
     // vértices
-    [wall.p1, wall.p2].forEach(p => {
+    [w.p1, w.p2].forEach(p => {
       ctx.fillStyle = 'rgba(255,80,80,0.9)';
       ctx.beginPath();
       ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
@@ -253,8 +254,7 @@ if (Lighting.Model.masterReveal) {
     });
   });
   ctx.restore();
-}
-  },
+},
 
   // ── Alças de resize ─────────────────────────────────────────
 

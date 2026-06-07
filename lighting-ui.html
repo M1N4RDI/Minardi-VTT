@@ -362,9 +362,9 @@ if (obj.shape === 'circle') {
   const circLabel = document.createElement('div');
   circLabel.style.cssText = 'font-size:0.78em;font-weight:bold;margin:8px 0 4px;opacity:0.8;text-transform:uppercase;';
   circLabel.innerText = 'Tamanho (diâmetro em quadrados)';
-  propsEl.appendChild(circLabel);
+  el.appendChild(circLabel);
 
-  const mkDiamRow = (label, field, otherField, otherRatio) => {
+  const mkDiamRow = (label, field) => {
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;';
     const lbl = document.createElement('label');
@@ -376,32 +376,29 @@ if (obj.shape === 'circle') {
     inp.step = '0.5';
     inp.value = obj[field] || (field === 'lightDiameter' ? 4 : 8);
     inp.style.cssText = 'width:60px;padding:4px;text-align:center;';
+    inp.dataset.field = field;
     inp.addEventListener('change', () => {
       const val = Math.max(0.5, parseFloat(inp.value) || 0.5);
       const updates = { [field]: val };
-      // mantém proporção: penumbra nunca menor que luz
       if (field === 'lightDiameter' && val * 2 > (obj.penumbraDiameter || 8)) {
         updates.penumbraDiameter = val * 2;
       }
       Lighting.Model.updateObject(obj.id, updates);
       Lighting.Model._save();
       Lighting.Render.draw();
-      // atualiza o outro campo se necessário
       if (field === 'lightDiameter') {
-        const otherInp = propsEl.querySelector('[data-field="penumbraDiameter"]');
+        const otherInp = el.querySelector('[data-field="penumbraDiameter"]');
         if (otherInp) otherInp.value = (Lighting.Model.getObject(obj.id) || obj).penumbraDiameter;
       }
     });
-    inp.dataset.field = field;
     row.appendChild(lbl);
     row.appendChild(inp);
-    propsEl.appendChild(row);
+    el.appendChild(row);
   };
 
   mkDiamRow('💡 Diâmetro da Luz', 'lightDiameter');
   mkDiamRow('🌫 Diâmetro da Penumbra', 'penumbraDiameter');
 
-  // Botão de proporção rápida (penumbra = 2× luz)
   const propBtn = document.createElement('button');
   propBtn.className = 'btn-full';
   propBtn.style.cssText = 'font-size:0.72em;margin-bottom:8px;background:#2a3a2a;';
@@ -409,13 +406,12 @@ if (obj.shape === 'circle') {
   propBtn.onclick = () => {
     const cur = Lighting.Model.getObject(obj.id);
     if (!cur) return;
-    const newPenum = (cur.lightDiameter || 4) * 2;
-    Lighting.Model.updateObject(obj.id, { penumbraDiameter: newPenum });
+    Lighting.Model.updateObject(obj.id, { penumbraDiameter: (cur.lightDiameter || 4) * 2 });
     Lighting.Model._save();
     Lighting.Render.draw();
-    this._renderProperties(); // redraws fields
+    this._renderProperties();
   };
-  propsEl.appendChild(propBtn);
+  el.appendChild(propBtn);
 }
 
     const row = document.createElement('div');
