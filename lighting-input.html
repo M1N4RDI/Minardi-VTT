@@ -165,7 +165,6 @@ Lighting.Input = {
 if (this.activeTool === 'polygon') {
   if (!this.toolState.points) this.toolState.points = [];
   const pts = this.toolState.points;
-
   if (pts.length >= 3) {
     const first = pts[0];
     if (Math.hypot(pt.x - first.x, pt.y - first.y) < 14) {
@@ -183,14 +182,7 @@ if (this.activeTool === 'polygon') {
       return;
     }
   }
-
   pts.push({ x: pt.x, y: pt.y });
-  Lighting.Render.draw();
-  return;
-}
-  }
-
-  pts.push({ x: point.x, y: point.y });
   Lighting.Render.draw();
   return;
 }
