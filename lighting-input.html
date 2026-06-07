@@ -13,7 +13,7 @@ Lighting.Input = {
   toolState:        {},
 
   // Estado de drag ativo
-  _drag: null,
+
   // _drag = {
   //   type: 'move' | 'handle' | 'rotate',
   //   objId,
@@ -75,9 +75,9 @@ _translatePolygon(objId, dx, dy) {
 
   _attachEvents() {
     this.canvas.addEventListener('mousedown',   e => this._onDown(e));
-    this.canvas.addEventListener('mousemove',   e => this._onMove(e));
+    this.canvas.addEventListener('mousemove',   e => this._onMouseMove(e));
     this.canvas.addEventListener('mouseup',     e => this._onUp(e));
-    this.canvas.addEventListener('dblclick',    e => this._onDbl(e));
+    this.canvas.addEventListener('dblclick',    e => this._onDoubleClick(e));
     this.canvas.addEventListener('contextmenu', e => this._onCtx(e));
   },
 
@@ -91,94 +91,140 @@ _translatePolygon(objId, dx, dy) {
   _pt(e) { return { x: e.offsetX, y: e.offsetY }; },
 
   // ── Mouse Down ───────────────────────────────────────────────
-  _onDown(e) {
-    if (!window.VTTMode || !VTTMode.is('lighting')) return;
-    if (e.button !== 0) return;
+_onDown(e) {
+  if (!window.VTTMode || !VTTMode.is('lighting')) return;
+  if (e.button !== 0) return;
 
-    const pt = this._pt(e);
+  const pt = this._pt(e);
 
-    // ─ Ferramenta select: testar alças → rotação → objeto ─
-    if (this.activeTool === 'select') {
-  // 1. Alça de rotação (rect e polygon)
-  if (this.selectedObjectId) {
-    const obj = Lighting.Model.getObject(this.selectedObjectId);
-    if (obj && !obj.locked) {
-      const rh = Lighting.Render.getRotateHandlePos(obj) } 
-  if (obj.shape === 'rect') {
-    const rot = (obj.rotation || 0) * Math.PI / 180;
-    const rcx = obj.x + (obj.width  || 100) / 2;
-    const rcy = obj.y + (obj.height || 100) / 2;
-    const dx = 0, dy = -(obj.height || 100) / 2 - 22;
-    return {
-      x: rcx + dx * Math.cos(rot) - dy * Math.sin(rot),
-      y: rcy + dx * Math.sin(rot) + dy * Math.cos(rot),
-    };
-  }
-  if (obj.shape === 'polygon' && obj.points && obj.points.length >= 3) {
-    // Alça de rotação: 22px acima do ponto mais alto do polígono
-    let minY = Infinity, cx = 0;
-    obj.points.forEach(p => { if (p.y < minY) { minY = p.y; cx = p.x; } cx += p.x; });
-    cx = obj.points.reduce((s, p) => s + p.x, 0) / obj.points.length;
-    return { x: cx, y: minY - 22 };
-  }
-  return null;
-}
+  if (this.activeTool === 'select') {
 
-      // 2. Alça de vértice de polígono
-      if (obj.shape === 'polygon' && obj.points) {
-        for (let i = 0; i < obj.points.length; i++) {
-          const p = obj.points[i];
-          if (Math.hypot(point.x - p.x, point.y - p.y) <= 8) {
+    if (this.selectedObjectId) {
+      const obj = Lighting.Model.getObject(this.selectedObjectId);
+
+      if (obj && !obj.locked) {
+
+        // ROTAÇÃO
+        const rh = Lighting.Render.getRotateHandlePos(obj);
+
+        if (
+          rh &&
+          Math.hypot(pt.x - rh.x, pt.y - rh.y) <= 10
+        ) {
+          const cx = obj.x + (obj.width || 100) / 2;
+          const cy = obj.y + (obj.height || 100) / 2;
+
+          this._drag = {
+            type: 'rotate',
+            objId: obj.id,
+            cx,
+            cy,
+            startAngle:
+              Math.atan2(pt.y - cy, pt.x - cx) *
+              180 / Math.PI,
+            startRotation: obj.rotation || 0
+          };
+
+          return;
+        }
+
+        // VÉRTICES POLYGON
+        if (
+          obj.shape === 'polygon' &&
+          obj.points
+        ) {
+          for (let i = 0; i < obj.points.length; i++) {
+            const p = obj.points[i];
+
+            if (
+              Math.hypot(
+                pt.x - p.x,
+                pt.y - p.y
+              ) <= 8
+            ) {
+              this._drag = {
+                type: 'poly-vertex',
+                objId: obj.id,
+                vertexIdx: i
+              };
+
+              return;
+            }
+          }
+        }
+
+        // HANDLES
+        const handles =
+          Lighting.Render.getHandles(obj);
+
+        for (const h of handles) {
+          if (
+            Math.hypot(
+              pt.x - h.x,
+              pt.y - h.y
+            ) <= 10
+          ) {
             this._drag = {
-              type: 'poly-vertex', objId: obj.id, vertexIdx: i,
-              startPt: point,
+              type: 'handle',
+              objId: obj.id,
+              handleId: h.handleId,
+              startPt: pt,
+              startObj:
+                structuredClone(obj)
             };
-            this.canvas.style.cursor = 'crosshair';
+
             return;
           }
         }
       }
+    }
 
-      // 3. Alças de resize (rect e circle)
-      const handles = Lighting.Render.getHandles(obj);
-      for (const h of handles) {
-        if (Math.hypot(point.x - h.x, point.y - h.y) <= 10) {
-          this._drag = {
-            type: 'handle', objId: obj.id, handleId: h.handleId,
-            startPt: point, startObj: { ...obj },
-          };
-          this.canvas.style.cursor = h.cursor;
-          return;
-        }
+    const hit = this._hitTest(pt);
+
+    if (hit) {
+
+      this.selectedObjectId = hit;
+
+      const obj =
+        Lighting.Model.getObject(hit);
+
+      if (obj && !obj.locked) {
+
+        this._drag = {
+          type:
+            obj.shape === 'polygon'
+              ? 'poly-move'
+              : 'move',
+
+          objId: hit,
+
+          startPt: pt,
+
+          startObj:
+            obj.shape === 'polygon'
+              ? {
+                  points:
+                    obj.points.map(
+                      p => ({ ...p })
+                    )
+                }
+              : {
+                  x: obj.x,
+                  y: obj.y
+                }
+        };
       }
-    }
-  },
 
-  // 4. Hit-test objeto
-  const: hit = this._hitTest(point),
-  if (hit) {
-    this.selectedObjectId = hit;
-    const obj = Lighting.Model.getObject(hit);
-    if (obj && !obj.locked) {
-      this._drag = {
-        type: obj.shape === 'polygon' ? 'poly-move' : 'move',
-        objId: hit,
-        startPt: point,
-        startObj: obj.shape === 'polygon'
-          ? { points: obj.points.map(p => ({...p})) }
-          : { x: obj.x, y: obj.y },
-      };
-      this.canvas.style.cursor = 'grabbing';
+    } else {
+      this.selectedObjectId = null;
+      this._drag = null;
     }
-  }, else: {
-    this: selectedObjectId = null,
-    this: _drag = null,
-  },
 
-  Lighting: Render.draw(),
-  return()
-}
-      
+    Lighting.Render.draw();
+    return;
+  }
+
+   
 
       // 2. Alça de resize
       if (this.selectedObjectId) {
@@ -210,7 +256,7 @@ _translatePolygon(objId, dx, dy) {
           this._drag = {
             type: 'move',
             objId: hit,
-            startPoint: pt,
+            startPt: pt,
             startObj: { ...obj },
           };
           this.canvas.style.cursor = 'grabbing';
@@ -278,19 +324,11 @@ if (this.activeTool === 'polygon') {
   
 
   // ── Mouse Move ───────────────────────────────────────────────
-  _onMouseMove(e); {
+  _onMouseMove(e) {
   if (!window.VTTMode || !VTTMode.is('lighting')) return;
-  const point = this._getPoint(e);
+  const pt = this._pt(e);
 
-  // Finaliza qualquer drag ativo
-if (this._drag) {
-  Lighting.Model._save();
-  if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
-  this._drag = null;
-  this.canvas.style.cursor = 'default';
-  Lighting.Render.draw();
-  return;
-}
+ 
 
   if (this._drag) {
     const drag = this._drag;
@@ -298,28 +336,28 @@ if (this._drag) {
     if (!obj) { this._drag = null; return; }
 
     if (drag.type === 'move') {
-      const dx = point.x - drag.startPt.x;
-      const dy = point.y - drag.startPt.y;
+      const dx = pt.x - drag.startPt.x;
+      const dy = pt.y - drag.startPt.y;
       Lighting.Model.updateObject(obj.id, {
         x: drag.startObj.x + dx,
         y: drag.startObj.y + dy,
       });
 
     } else if (drag.type === 'poly-move') {
-      const dx = point.x - drag.startPt.x;
-      const dy = point.y - drag.startPt.y;
+      const dx = pt.x - drag.startPt.x;
+      const dy = pt.y - drag.startPt.y;
       Lighting.Model.updateObject(obj.id, {
         points: drag.startObj.points.map(p => ({ x: p.x + dx, y: p.y + dy })),
       });
 
     } else if (drag.type === 'poly-vertex') {
       const newPoints = obj.points.map((p, i) =>
-        i === drag.vertexIdx ? { x: point.x, y: point.y } : { ...p }
+        i === drag.vertexIdx ? { x: pt.x, y: pt.y } : { ...p }
       );
       Lighting.Model.updateObject(obj.id, { points: newPoints });
 
     } else if (drag.type === 'rotate') {
-      const angle = Math.atan2(point.y - drag.cy, point.x - drag.cx) * 180 / Math.PI;
+      const angle = Math.atan2(pt.y - drag.cy, pt.x - drag.cx) * 180 / Math.PI;
       const delta = angle - drag.startAngle;
       if (obj.shape === 'polygon' && drag.startPoints) {
         const rad = delta * Math.PI / 180;
@@ -338,8 +376,10 @@ if (this._drag) {
       }
 
     } else if (drag.type === 'handle') {
-      this._applyHandle(obj, drag.handleId, point, drag.startObj);
+      this._applyHandle(obj, drag.handleId, pt, drag.startObj);
     }
+
+     
 
     Lighting.Render.draw();
     return;
@@ -347,23 +387,23 @@ if (this._drag) {
 
   // Previews de ferramentas sem drag ativo
   if (this.activeTool === 'rect' && this.toolState.start) {
-    this.toolState.current = point; Lighting.Render.draw(); return;
+    this.toolState.current = pt; Lighting.Render.draw(); return;
   }
   if (this.activeTool === 'circle' && this.toolState.start) {
-    this.toolState.current = point; Lighting.Render.draw(); return;
+    this.toolState.current = pt; Lighting.Render.draw(); return;
   }
   if (this.activeTool === 'wall' && this.toolState.p1) {
-    this.toolState.current = point; Lighting.Render.draw(); return;
+    this.toolState.current = pt; Lighting.Render.draw(); return;
   }
   if (this.activeTool === 'polygon' && this.toolState.points) {
-    this.toolState.current = point; Lighting.Render.draw(); return;
+    this.toolState.current = pt; Lighting.Render.draw(); return;
   }
 
   Lighting.Render.draw();
 }
 
   // ── Mouse Up ─────────────────────────────────────────────────
-  _onUp(e); {
+  _onUp(e) {
     if (!window.VTTMode || !VTTMode.is('lighting')) return;
     const pt = this._pt(e);
 
@@ -427,10 +467,10 @@ if (this._drag) {
       Lighting.Render.draw();
       return;
     }
-  }
+  },
 
   // ── Duplo clique: fecha polígono ─────────────────────────────
-  _onDoubleClick(e); {
+  _onDoubleClick(e) {
   if (!window.VTTMode || !VTTMode.is('lighting')) return;
   if (this.activeTool === 'polygon' && this.toolState.points && this.toolState.points.length >= 3) {
     const pts = this.toolState.points;
@@ -449,10 +489,10 @@ if (this._drag) {
     Lighting.Render.draw();
     if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
   }
-}
+},
 
   // ── Context menu ─────────────────────────────────────────────
-  _onCtx(e); {
+  _onCtx(e) {
     if (!window.VTTMode || !VTTMode.is('lighting')) return;
     e.preventDefault();
     e.stopPropagation();
@@ -466,10 +506,10 @@ if (this._drag) {
           Lighting.UI.showContextMenu(hit, { x: e.clientX, y: e.clientY });
       }, 0);
        }
-  }
+  },
 
   // ── Aplicar alça de resize ───────────────────────────────────
-  _applyHandle(obj, handleId, pt, s); 
+  _applyHandle(obj, handleId, pt, s)
   {
     const gs = window.VTTGrid?.size || 50;
 
@@ -504,15 +544,15 @@ if (this._drag) {
       }
       // Alça de mover (centro)
       if (handleId === 'center') {
-        const dx = pt.x - this._drag.startPoint.x;
-        const dy = pt.y - this._drag.startPoint.y;
+        const dx = pt.x - this._drag.startPt.x;
+        const dy = pt.y - this._drag.startPt.y;
         Lighting.Model.updateObject(obj.id, { x: s.x + dx, y: s.y + dy });
       }
     }
-  }
+  },
 
   // ── Hit test ─────────────────────────────────────────────────
-  _hitTest(pt); {
+  _hitTest(pt) {
     const gs   = window.VTTGrid?.size || 50;
     const hitR = 8;
 
@@ -549,9 +589,9 @@ if (this._drag) {
     }
 
     return null;
-  }
+  },
 
-  _pip(pt, poly); {
+  _pip(pt, poly) {
     let inside = false;
     for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
       const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
@@ -559,53 +599,14 @@ if (this._drag) {
     }
     return inside;
   }
+}; 
 
-_applyHandle(obj, handleId, pt, s); {
-  const gs = window.VTTGrid?.size || 50;
-  if (obj.shape === 'rect') {
-    let { x, y, width: w, height: h } = s;
-    if (handleId==='tl'){const nw=(x+w)-pt.x,nh=(y+h)-pt.y;if(nw>10&&nh>10){x=pt.x;y=pt.y;w=nw;h=nh;}}
-    if (handleId==='tr'){const nw=pt.x-x,nh=(y+h)-pt.y;if(nw>10&&nh>10){y=pt.y;w=nw;h=nh;}}
-    if (handleId==='bl'){const nw=(x+w)-pt.x,nh=pt.y-y;if(nw>10&&nh>10){x=pt.x;w=nw;h=nh;}}
-    if (handleId==='br'){const nw=pt.x-x,nh=pt.y-y;if(nw>10&&nh>10){w=nw;h=nh;}}
-    if (handleId==='tm'){const nh=(y+h)-pt.y;if(nh>10){y=pt.y;h=nh;}}
-    if (handleId==='bm'){const nh=pt.y-y;if(nh>10)h=nh;}
-    if (handleId==='ml'){const nw=(x+w)-pt.x;if(nw>10){x=pt.x;w=nw;}}
-    if (handleId==='mr'){const nw=pt.x-x;if(nw>10)w=nw;}
-    Lighting.Model.updateObject(obj.id, { x, y, width: w, height: h });
-  } else if (obj.shape === 'circle') {
-    if (handleId === 'light-r') {
-      const dist = Math.abs(pt.x - s.x);
-      Lighting.Model.updateObject(obj.id, { lightDiameter: Math.max(0.5, Math.round(dist/gs*2*10)/10) });
-    }
-    if (handleId === 'penum-r') {
-      const dist = Math.abs(pt.x - s.x);
-      Lighting.Model.updateObject(obj.id, { penumbraDiameter: Math.max(0.5, Math.round(dist/gs*2*10)/10) });
-    }
-    if (handleId === 'center') {
-      const dx = pt.x - this._drag.startPt.x;
-      const dy = pt.y - this._drag.startPt.y;
-      Lighting.Model.updateObject(obj.id, { x: s.x + dx, y: s.y + dy });
-    }
-  }
+ Lighting.Input.init();
 
-  // Vértices do polígono
-if (obj.shape === 'polygon' && obj.points) {
-  obj.points.forEach((p, i) => {
-    ctx.save();
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-  });
-}
+  
 
-}
 
-Lighting.Input.init();
+
+
+
 </script>
