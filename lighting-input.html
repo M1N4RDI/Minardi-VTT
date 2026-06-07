@@ -103,7 +103,7 @@ _translatePolygon(objId, dx, dy) {
   if (this.selectedObjectId) {
     const obj = Lighting.Model.getObject(this.selectedObjectId);
     if (obj && !obj.locked) {
-      const rh = Lighting.Render.getRotateHandlePos(obj) {
+      const rh = Lighting.Render.getRotateHandlePos(obj) } 
   if (obj.shape === 'rect') {
     const rot = (obj.rotation || 0) * Math.PI / 180;
     const rcx = obj.x + (obj.width  || 100) / 2;
@@ -122,7 +122,7 @@ _translatePolygon(objId, dx, dy) {
     return { x: cx, y: minY - 22 };
   }
   return null;
-},
+}
 
       // 2. Alça de vértice de polígono
       if (obj.shape === 'polygon' && obj.points) {
@@ -152,10 +152,10 @@ _translatePolygon(objId, dx, dy) {
         }
       }
     }
-  }
+  },
 
   // 4. Hit-test objeto
-  const hit = this._hitTest(point);
+  const: hit = this._hitTest(point),
   if (hit) {
     this.selectedObjectId = hit;
     const obj = Lighting.Model.getObject(hit);
@@ -170,16 +170,15 @@ _translatePolygon(objId, dx, dy) {
       };
       this.canvas.style.cursor = 'grabbing';
     }
-  } else {
-    this.selectedObjectId = null;
-    this._drag = null;
-  }
+  }, else: {
+    this: selectedObjectId = null,
+    this: _drag = null,
+  },
 
-  Lighting.Render.draw();
-  return;
+  Lighting: Render.draw(),
+  return()
 }
-        }
-      }
+      
 
       // 2. Alça de resize
       if (this.selectedObjectId) {
@@ -223,7 +222,7 @@ _translatePolygon(objId, dx, dy) {
 
       Lighting.Render.draw();
       return;
-    }
+    
 
     // ─ Ferramenta rect ─────────────────────────────────────────
     if (this.activeTool === 'rect') {
@@ -276,10 +275,10 @@ if (this.activeTool === 'polygon') {
         if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
       }
     }
-  },
+  
 
   // ── Mouse Move ───────────────────────────────────────────────
-  _onMouseMove(e) {
+  _onMouseMove(e); {
   if (!window.VTTMode || !VTTMode.is('lighting')) return;
   const point = this._getPoint(e);
 
@@ -361,10 +360,10 @@ if (this._drag) {
   }
 
   Lighting.Render.draw();
-},
+}
 
   // ── Mouse Up ─────────────────────────────────────────────────
-  _onUp(e) {
+  _onUp(e); {
     if (!window.VTTMode || !VTTMode.is('lighting')) return;
     const pt = this._pt(e);
 
@@ -428,10 +427,10 @@ if (this._drag) {
       Lighting.Render.draw();
       return;
     }
-  },
+  }
 
   // ── Duplo clique: fecha polígono ─────────────────────────────
-  _onDoubleClick(e) {
+  _onDoubleClick(e); {
   if (!window.VTTMode || !VTTMode.is('lighting')) return;
   if (this.activeTool === 'polygon' && this.toolState.points && this.toolState.points.length >= 3) {
     const pts = this.toolState.points;
@@ -450,10 +449,10 @@ if (this._drag) {
     Lighting.Render.draw();
     if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
   }
-},
+}
 
   // ── Context menu ─────────────────────────────────────────────
-  _onCtx(e) {
+  _onCtx(e); {
     if (!window.VTTMode || !VTTMode.is('lighting')) return;
     e.preventDefault();
     e.stopPropagation();
@@ -466,11 +465,12 @@ if (this._drag) {
         if (window.Lighting && Lighting.UI)
           Lighting.UI.showContextMenu(hit, { x: e.clientX, y: e.clientY });
       }, 0);
-    }
-  },
+       }
+  }
 
   // ── Aplicar alça de resize ───────────────────────────────────
-  _applyHandle(obj, handleId, pt, s) {
+  _applyHandle(obj, handleId, pt, s); 
+  {
     const gs = window.VTTGrid?.size || 50;
 
     if (obj.shape === 'rect') {
@@ -509,10 +509,10 @@ if (this._drag) {
         Lighting.Model.updateObject(obj.id, { x: s.x + dx, y: s.y + dy });
       }
     }
-  },
+  }
 
   // ── Hit test ─────────────────────────────────────────────────
-  _hitTest(pt) {
+  _hitTest(pt); {
     const gs   = window.VTTGrid?.size || 50;
     const hitR = 8;
 
@@ -549,19 +549,18 @@ if (this._drag) {
     }
 
     return null;
-  },
+  }
 
-  _pip(pt, poly) {
+  _pip(pt, poly); {
     let inside = false;
     for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
       const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
       if ((yi > pt.y) !== (yj > pt.y) && pt.x < ((xj-xi)*(pt.y-yi))/(yj-yi)+xi) inside = !inside;
     }
     return inside;
-  },
-};
+  }
 
-_applyHandle(obj, handleId, pt, s) {
+_applyHandle(obj, handleId, pt, s); {
   const gs = window.VTTGrid?.size || 50;
   if (obj.shape === 'rect') {
     let { x, y, width: w, height: h } = s;
@@ -606,7 +605,7 @@ if (obj.shape === 'polygon' && obj.points) {
   });
 }
 
-},
+}
 
 Lighting.Input.init();
 </script>
