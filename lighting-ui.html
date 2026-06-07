@@ -355,6 +355,69 @@ Lighting.UI = {
     info.innerText = `${obj.mode === 'dark' ? 'Escuridão' : 'Luz'} · ${{ rect:'Retângulo', circle:'Círculo', polygon:'Polígono' }[obj.shape] || obj.shape}`;
     el.appendChild(info);
 
+// ── Campos de diâmetro para círculos ──────────────────────────
+if (obj.shape === 'circle') {
+  const gs = window.VTTGrid?.size || 50;
+
+  const circLabel = document.createElement('div');
+  circLabel.style.cssText = 'font-size:0.78em;font-weight:bold;margin:8px 0 4px;opacity:0.8;text-transform:uppercase;';
+  circLabel.innerText = 'Tamanho (diâmetro em quadrados)';
+  propsEl.appendChild(circLabel);
+
+  const mkDiamRow = (label, field, otherField, otherRatio) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;';
+    const lbl = document.createElement('label');
+    lbl.style.cssText = 'flex:1;font-size:0.82em;';
+    lbl.innerText = label;
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.min = '0.5';
+    inp.step = '0.5';
+    inp.value = obj[field] || (field === 'lightDiameter' ? 4 : 8);
+    inp.style.cssText = 'width:60px;padding:4px;text-align:center;';
+    inp.addEventListener('change', () => {
+      const val = Math.max(0.5, parseFloat(inp.value) || 0.5);
+      const updates = { [field]: val };
+      // mantém proporção: penumbra nunca menor que luz
+      if (field === 'lightDiameter' && val * 2 > (obj.penumbraDiameter || 8)) {
+        updates.penumbraDiameter = val * 2;
+      }
+      Lighting.Model.updateObject(obj.id, updates);
+      Lighting.Model._save();
+      Lighting.Render.draw();
+      // atualiza o outro campo se necessário
+      if (field === 'lightDiameter') {
+        const otherInp = propsEl.querySelector('[data-field="penumbraDiameter"]');
+        if (otherInp) otherInp.value = (Lighting.Model.getObject(obj.id) || obj).penumbraDiameter;
+      }
+    });
+    inp.dataset.field = field;
+    row.appendChild(lbl);
+    row.appendChild(inp);
+    propsEl.appendChild(row);
+  };
+
+  mkDiamRow('💡 Diâmetro da Luz', 'lightDiameter');
+  mkDiamRow('🌫 Diâmetro da Penumbra', 'penumbraDiameter');
+
+  // Botão de proporção rápida (penumbra = 2× luz)
+  const propBtn = document.createElement('button');
+  propBtn.className = 'btn-full';
+  propBtn.style.cssText = 'font-size:0.72em;margin-bottom:8px;background:#2a3a2a;';
+  propBtn.innerText = '⟳ Penumbra = 2× Luz';
+  propBtn.onclick = () => {
+    const cur = Lighting.Model.getObject(obj.id);
+    if (!cur) return;
+    const newPenum = (cur.lightDiameter || 4) * 2;
+    Lighting.Model.updateObject(obj.id, { penumbraDiameter: newPenum });
+    Lighting.Model._save();
+    Lighting.Render.draw();
+    this._renderProperties(); // redraws fields
+  };
+  propsEl.appendChild(propBtn);
+}
+
     const row = document.createElement('div');
     row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:8px;';
 

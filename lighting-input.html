@@ -162,12 +162,34 @@ Lighting.Input = {
     }
 
     // ─ Ferramenta polygon ──────────────────────────────────────
-    if (this.activeTool === 'polygon') {
-      if (!this.toolState.points) this.toolState.points = [];
-      this.toolState.points.push({ ...pt });
+  if (this.activeTool === 'polygon') {
+  if (!this.toolState.points) this.toolState.points = [];
+  const pts = this.toolState.points;
+
+  // Snap-to-close: se clicar perto do primeiro vértice e já tiver 3+, fecha
+  if (pts.length >= 3) {
+    const first = pts[0];
+    if (Math.hypot(point.x - first.x, point.y - first.y) < 14) {
+      // Fecha o polígono
+      Lighting.Model.addObject({
+        name: 'Polígono',
+        shape: 'polygon',
+        x: 0, y: 0,
+        points: pts.slice(), // cópia
+      });
+      Lighting.Model._save();
+      this.toolState = {};
+      this.setActiveTool('select');
       Lighting.Render.draw();
+      if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
       return;
     }
+  }
+
+  pts.push({ x: point.x, y: point.y });
+  Lighting.Render.draw();
+  return;
+}
 
     // ─ Ferramenta wall ─────────────────────────────────────────
     if (this.activeTool === 'wall') {
@@ -322,20 +344,26 @@ Lighting.Input = {
   },
 
   // ── Duplo clique: fecha polígono ─────────────────────────────
-  _onDbl(e) {
-    if (!window.VTTMode || !VTTMode.is('lighting')) return;
-    if (this.activeTool === 'polygon' && this.toolState.points && this.toolState.points.length >= 3) {
-      Lighting.Model.addObject({
-        name: 'Polígono', shape: 'polygon',
-        x: 0, y: 0, points: this.toolState.points,
-      });
-      Lighting.Model._save();
-      this.toolState = {};
-      this.setActiveTool('select');
-      Lighting.Render.draw();
-      if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
-    }
-  },
+  _onDoubleClick(e) {
+  if (!window.VTTMode || !VTTMode.is('lighting')) return;
+  if (this.activeTool === 'polygon' && this.toolState.points && this.toolState.points.length >= 3) {
+    const pts = this.toolState.points;
+    // O duplo clique adiciona 1 ponto extra via mousedown — remove o último
+    pts.pop();
+    if (pts.length < 3) return;
+    Lighting.Model.addObject({
+      name: 'Polígono',
+      shape: 'polygon',
+      x: 0, y: 0,
+      points: pts.slice(),
+    });
+    Lighting.Model._save();
+    this.toolState = {};
+    this.setActiveTool('select');
+    Lighting.Render.draw();
+    if (window.Lighting && Lighting.UI) Lighting.UI.refresh();
+  }
+},
 
   // ── Context menu ─────────────────────────────────────────────
   _onCtx(e) {

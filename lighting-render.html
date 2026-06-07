@@ -233,20 +233,27 @@ Lighting.Render = {
 
   _drawWalls(ctx) {
     if (!Lighting.Model.walls || !Lighting.Model.walls.length) return;
-    ctx.save();
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.strokeStyle = 'rgba(255,90,90,0.65)';
-    ctx.lineWidth   = 2;
-    ctx.setLineDash([5, 4]);
-    Lighting.Model.walls.forEach(w => {
-      if (!w.visible || !w.p1 || !w.p2) return;
+    // paredes: só visíveis no masterReveal, linha sólida
+if (Lighting.Model.masterReveal) {
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,80,80,0.75)';
+  ctx.lineWidth = 2;
+  Lighting.Model.walls.forEach((wall) => {
+    if (!wall.visible) return;
+    ctx.beginPath();
+    ctx.moveTo(wall.p1.x, wall.p1.y);
+    ctx.lineTo(wall.p2.x, wall.p2.y);
+    ctx.stroke();
+    // vértices
+    [wall.p1, wall.p2].forEach(p => {
+      ctx.fillStyle = 'rgba(255,80,80,0.9)';
       ctx.beginPath();
-      ctx.moveTo(w.p1.x, w.p1.y);
-      ctx.lineTo(w.p2.x, w.p2.y);
-      ctx.stroke();
+      ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+      ctx.fill();
     });
-    ctx.setLineDash([]);
-    ctx.restore();
+  });
+  ctx.restore();
+}
   },
 
   // ── Alças de resize ─────────────────────────────────────────
@@ -404,17 +411,47 @@ Lighting.Render = {
       ctx.fill(); ctx.stroke();
     }
 
-    if (activeTool === 'polygon' && toolState.points && toolState.points.length > 0) {
-      const pts = toolState.points;
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      if (toolState.current) ctx.lineTo(toolState.current.x, toolState.current.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = 'rgba(80,220,120,0.9)';
-      pts.forEach(p => ctx.fillRect(p.x - 4, p.y - 4, 8, 8));
+    if (activeTool === 'polygon' && Lighting.Input.toolState.points) {
+  const pts = Lighting.Input.toolState.points;
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 4]);
+  if (pts.length > 0) {
+    ctx.strokeStyle = 'rgba(80,200,100,0.8)';
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    if (Lighting.Input.toolState.current) {
+      ctx.lineTo(Lighting.Input.toolState.current.x, Lighting.Input.toolState.current.y);
     }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Vértices: primeiro em laranja (snap target), demais em verde
+    pts.forEach((p, i) => {
+      const snapRadius = 12;
+      const cur = Lighting.Input.toolState.current;
+      const nearFirst = i === 0 && cur &&
+        Math.hypot(cur.x - pts[0].x, cur.y - pts[0].y) < snapRadius;
+
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, i === 0 ? 7 : 5, 0, Math.PI * 2);
+      // Primeiro vértice: laranja se cursor perto (snap hint), senão amarelo
+      if (i === 0) {
+        ctx.fillStyle = nearFirst ? 'rgba(255,140,0,1)' : 'rgba(255,200,50,0.95)';
+        // anel extra para indicar que é o ponto de fechamento
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = 'rgba(80,200,100,0.9)';
+        ctx.fill();
+      }
+    });
+  }
+  ctx.restore();
+}
 
     if (activeTool === 'wall' && toolState.p1) {
       ctx.strokeStyle = 'rgba(255,100,100,0.9)';
