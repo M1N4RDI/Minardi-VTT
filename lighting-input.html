@@ -125,12 +125,15 @@ const cy = center.y;
   objId: obj.id,
   cx,
   cy,
+  startCx: cx,
+startCy: cy,
   startAngle:
     Math.atan2(pt.y - cy, pt.x - cx) * 180 / Math.PI,
   startRotation: obj.rotation || 0,
   startPoints: obj.shape === 'polygon'
     ? obj.points.map(p => ({ ...p }))
     : null
+    
 };
 
           return;
@@ -321,32 +324,37 @@ if (this.activeTool === 'polygon') {
       );
       Lighting.Model.updateObject(obj.id, { points: newPoints });
 
-    } else if (drag.type === 'rotate') {
-  const angle = Math.atan2(pt.y - drag.cy, pt.x - drag.cx) * 180 / Math.PI;
+    }  else if (drag.type === 'rotate') {
+  const cx = drag.cx;
+  const cy = drag.cy;
+
+  const angle = Math.atan2(pt.y - cy, pt.x - cx) * 180 / Math.PI;
   const delta = angle - drag.startAngle;
   const rad = delta * Math.PI / 180;
 
-  // POLÍGONO (usa snapshot sempre)
   if (drag.startPoints) {
     const newPoints = drag.startPoints.map(p => {
-      const dx = p.x - drag.cx;
-      const dy = p.y - drag.cy;
+      const dx = p.x - cx;
+      const dy = p.y - cy;
 
       return {
-        x: drag.cx + dx * Math.cos(rad) - dy * Math.sin(rad),
-        y: drag.cy + dx * Math.sin(rad) + dy * Math.cos(rad),
+        x: cx + dx * Math.cos(rad) - dy * Math.sin(rad),
+        y: cy + dx * Math.sin(rad) + dy * Math.cos(rad),
       };
     });
 
     Lighting.Model.updateObject(obj.id, { points: newPoints });
-    Lighting.Render.draw();
-    return;
+  } else {
+    Lighting.Model.updateObject(obj.id, {
+      rotation: ((drag.startRotation + delta) % 360 + 360) % 360,
+    });
   }
 
-  // RECT / outros
-  Lighting.Model.updateObject(obj.id, {
-    rotation: ((drag.startRotation + delta) % 360 + 360) % 360,
-  });
+  Lighting.Render.draw();
+  return;
+}
+
+
 
     } else if (drag.type === 'handle') {
       this._applyHandle(obj, drag.handleId, pt, drag.startObj);
@@ -356,7 +364,7 @@ if (this.activeTool === 'polygon') {
 
     Lighting.Render.draw();
     return;
-  }
+  
 
   // Previews de ferramentas sem drag ativo
   if (this.activeTool === 'rect' && this.toolState.start) {
@@ -373,7 +381,7 @@ if (this.activeTool === 'polygon') {
   }
 
   Lighting.Render.draw();
-},
+  }, 
 
   // ── Mouse Up ─────────────────────────────────────────────────
   _onUp(e) {
