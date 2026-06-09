@@ -57,7 +57,11 @@ Lighting.Render = {
     const H   = this._canvas.height;
 
     ctx.clearRect(0, 0, W, H);
-    if (!Lighting.Model.enabled) return;
+
+if (!Lighting.Model.enabled) {
+  this._drawUI();
+  return;
+}
 
     if (Lighting.Model.masterReveal) {
       ctx.fillStyle = 'rgba(0,0,0,0.12)';
@@ -256,6 +260,84 @@ _drawWalls(ctx) {
   ctx.restore();
 },
 
+_getBounds(obj) {
+
+  if (obj.shape === 'rect') {
+    return {
+      minX: obj.x,
+      minY: obj.y,
+      maxX: obj.x + (obj.width || 100),
+      maxY: obj.y + (obj.height || 100),
+      width: obj.width || 100,
+      height: obj.height || 100
+    };
+  }
+
+  if (obj.shape === 'polygon' && obj.points?.length) {
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    obj.points.forEach(p => {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    });
+
+    return {
+      minX,
+      minY,
+      maxX,
+      maxY,
+      width: maxX - minX,
+      height: maxY - minY
+    };
+  }
+
+  return {
+    minX: 0,
+    minY: 0,
+    maxX: 0,
+    maxY: 0,
+    width: 0,
+    height: 0
+  };
+},
+
+_getCenter(obj) {
+
+  if (
+    obj.shape === 'polygon' &&
+    obj.points?.length
+  ) {
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    obj.points.forEach(p => {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    });
+
+    return {
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2
+    };
+  }
+
+  return {
+    x: obj.x + (obj.width || 100) / 2,
+    y: obj.y + (obj.height || 100) / 2
+  };
+},
+
   // ── Alças de resize ─────────────────────────────────────────
 
   getHandles(obj) {
@@ -298,17 +380,36 @@ _drawWalls(ctx) {
   },
 
   getRotateHandlePos(obj) {
-    if (obj.shape !== 'rect') return null;
-    const rot = (obj.rotation || 0) * Math.PI / 180;
-    const rcx = obj.x + (obj.width  || 100) / 2;
-    const rcy = obj.y + (obj.height || 100) / 2;
-    // Alça 22px acima do centro superior, rotacionada
-    const dx = 0, dy = -(obj.height || 100) / 2 - 22;
-    return {
-      x: rcx + dx * Math.cos(rot) - dy * Math.sin(rot),
-      y: rcy + dx * Math.sin(rot) + dy * Math.cos(rot),
-    };
-  },
+
+  if (
+    obj.shape !== 'rect' &&
+    obj.shape !== 'polygon'
+  ) {
+    return null;
+  }
+
+  const bounds = this._getBounds(obj);
+  const center = this._getCenter(obj);
+
+  const rot =
+    (obj.rotation || 0) *
+    Math.PI / 180;
+
+  const dx = 0;
+  const dy = -(bounds.height / 2) - 22;
+
+  return {
+    x:
+      center.x +
+      dx * Math.cos(rot) -
+      dy * Math.sin(rot),
+
+    y:
+      center.y +
+      dx * Math.sin(rot) +
+      dy * Math.cos(rot)
+  };
+},
 
   _drawHandles(ctx, obj) {
     const gs = window.VTTGrid?.size || 50;
@@ -345,22 +446,58 @@ _drawWalls(ctx) {
   },
 
   _drawRotateHandle(ctx, obj) {
-    const rh = this.getRotateHandlePos(obj);
-    if (!rh) return;
-    const rcx = obj.x + (obj.width  || 100) / 2;
-    const rcy = obj.y + (obj.height || 100) / 2;
-    ctx.save();
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle   = 'rgba(200,100,255,0.9)';
-    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-    ctx.lineWidth   = 1;
-    ctx.beginPath(); ctx.arc(rh.x, rh.y, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.strokeStyle = 'rgba(200,100,255,0.5)';
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath(); ctx.moveTo(rcx, obj.y); ctx.lineTo(rh.x, rh.y); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
-  },
+
+  const rh = this.getRotateHandlePos(obj);
+
+  if (!rh) return;
+
+  const center =
+    this._getCenter(obj);
+
+  ctx.save();
+
+  ctx.globalCompositeOperation =
+    'source-over';
+
+  ctx.fillStyle =
+    'rgba(200,100,255,0.9)';
+
+  ctx.strokeStyle =
+    'rgba(0,0,0,0.5)';
+
+  ctx.lineWidth = 1;
+
+  ctx.beginPath();
+  ctx.arc(
+    rh.x,
+    rh.y,
+    7,
+    0,
+    Math.PI * 2
+  );
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.strokeStyle =
+    'rgba(200,100,255,0.5)';
+
+  ctx.setLineDash([3, 3]);
+
+  ctx.beginPath();
+  ctx.moveTo(
+    center.x,
+    center.y
+  );
+  ctx.lineTo(
+    rh.x,
+    rh.y
+  );
+  ctx.stroke();
+
+  ctx.setLineDash([]);
+
+  ctx.restore();
+},
 
   _drawUI() {
     if (!window.Lighting || !Lighting.Input) return;
@@ -381,9 +518,16 @@ _drawWalls(ctx) {
         this._strokeShape(ctx, obj);
         ctx.setLineDash([]);
         if (!obj.locked) {
-          this._drawHandles(ctx, obj);
-          if (obj.shape === 'rect') this._drawRotateHandle(ctx, obj);
-        }
+
+  this._drawHandles(ctx, obj);
+
+  if (
+    obj.shape === 'rect' ||
+    obj.shape === 'polygon'
+  ) {
+    this._drawRotateHandle(ctx, obj);
+  }
+}
       }
     }
 

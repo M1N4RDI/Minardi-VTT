@@ -23,22 +23,10 @@ Lighting.Input = {
   //   startAngle?,       // para rotação
   // }
 
-// Calcula centroide de um polígono
-_getCenter(obj) {
-  if (obj.shape === 'polygon' && obj.points?.length) {
-    return this._centroid(obj.points);
-  }
-
   return {
     x: obj.x + (obj.width || 100) / 2,
     y: obj.y + (obj.height || 100) / 2
   };
-},
-
-_centroid(points) {
-  let cx = 0, cy = 0;
-  points.forEach(p => { cx += p.x; cy += p.y; });
-  return { x: cx / points.length, y: cy / points.length };
 },
 
 // Translada todos os pontos de um polígono
