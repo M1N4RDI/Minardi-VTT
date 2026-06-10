@@ -23,11 +23,12 @@ Lighting.Input = {
   //   startAngle?,       // para rotação
   // }
 
-  return {
-    x: obj.x + (obj.width || 100) / 2,
-    y: obj.y + (obj.height || 100) / 2
-  };
-},
+  _getCenter(obj) {
+    return {
+      x: obj.x + (obj.width || 100) / 2,
+      y: obj.y + (obj.height || 100) / 2
+    };
+  },
 
 // Translada todos os pontos de um polígono
 
