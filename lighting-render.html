@@ -60,7 +60,7 @@ Lighting.Render = {
 
     ctx.clearRect(0, 0, W, H);
 
-    if (!Lighting.Model.enabled) {
+    if (!Lighting.Model.fogEnabled) {
       this._drawWalls(ctx);
       this._drawUI();
       return;
@@ -100,8 +100,8 @@ Lighting.Render = {
 
     lightObjs.forEach(obj => {
       if (obj.shape === 'circle') {
-        const lightR = ((obj.lightDiameter   || 4) / 2) * gs;
-        const penumR = ((obj.penumbraDiameter || 8) / 2) * gs;
+        const lightR = ((obj.luminosity   || 4) / 2) * gs;
+        const penumR = ((obj.penumbra     || 8) / 2) * gs;
         const cx = obj.x, cy = obj.y;
 
         if (penumR > lightR) {
@@ -160,7 +160,7 @@ Lighting.Render = {
       ctx.rect(obj.x, obj.y, obj.width || 100, obj.height || 100);
     } else if (obj.shape === 'circle') {
       const gs = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
-      const r  = ((obj.penumbraDiameter || obj.lightDiameter || 4) / 2) * gs;
+      const r  = (obj.radius || 4) * gs;
       ctx.arc(obj.x, obj.y, r, 0, Math.PI * 2);
     } else if (obj.shape === 'polygon' && obj.points?.length >= 3) {
       ctx.moveTo(obj.points[0].x, obj.points[0].y);
@@ -208,7 +208,10 @@ Lighting.Render = {
     if (obj.shape === 'rect') {
       ctx.rect(obj.x, obj.y, obj.width || 100, obj.height || 100);
     } else if (obj.shape === 'circle') {
-      const r = ((obj.lightDiameter || 4) / 2) * gs;
+      // Para dark: radius em quadrados; para light: luminosity em quadrados
+      const r = obj.mode === 'dark'
+        ? (obj.radius    || 4) * gs
+        : ((obj.luminosity || 4) / 2) * gs;
       ctx.arc(obj.x, obj.y, r, 0, Math.PI * 2);
     } else if (obj.shape === 'polygon' && obj.points?.length >= 3) {
       ctx.moveTo(obj.points[0].x, obj.points[0].y);
@@ -472,8 +475,8 @@ Lighting.Render = {
       ];
     }
     if (obj.shape === 'circle') {
-      const lightR = ((obj.lightDiameter   || 4) / 2) * gs;
-      const penumR = ((obj.penumbraDiameter || 8) / 2) * gs;
+      const lightR = ((obj.luminosity || 4) / 2) * gs;
+      const penumR = ((obj.penumbra   || 8) / 2) * gs;
       return [
         { x: obj.x + lightR, y: obj.y, cursor: 'ew-resize', handleId: 'light-r'  },
         { x: obj.x,          y: obj.y, cursor: 'move',       handleId: 'center'   },
@@ -534,8 +537,8 @@ Lighting.Render = {
       ctx.fill(); ctx.stroke();
     });
     if (obj.shape === 'circle') {
-      const lightR = ((obj.lightDiameter   || 4) / 2) * gs;
-      const penumR = ((obj.penumbraDiameter || 8) / 2) * gs;
+      const lightR = ((obj.luminosity || 4) / 2) * gs;
+      const penumR = ((obj.penumbra   || 8) / 2) * gs;
       ctx.setLineDash([3, 3]);
       ctx.lineWidth   = 1;
       ctx.strokeStyle = 'rgba(255,230,80,0.6)';

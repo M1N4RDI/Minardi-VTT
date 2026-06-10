@@ -177,11 +177,37 @@ cat.style.display = 'block';
     });
     grid.appendChild(coverBtn);
 
-    const revealBtn = this._btn('☀ Mostrar Tudo', () => {
-      Lighting.Model.masterReveal = !Lighting.Model.masterReveal;
-      Lighting.Render.draw();
-      revealBtn.style.opacity = Lighting.Model.masterReveal ? '1' : '0.7';
-    });
+    const fogBtn = this._btn('🌫 Fog of War', () => {
+  Lighting.Model.fogEnabled =
+    !Lighting.Model.fogEnabled;
+
+  Lighting.Model._save();
+
+  fogBtn.style.opacity =
+    Lighting.Model.fogEnabled ? '1' : '0.7';
+
+  Lighting.Render.draw();
+});
+
+fogBtn.style.opacity =
+  Lighting.Model.fogEnabled ? '1' : '0.7';
+
+grid.appendChild(fogBtn);
+
+  const revealBtn = this._btn('☀ Mostrar Tudo', () => {
+  Lighting.Model.masterReveal =
+    !Lighting.Model.masterReveal;
+
+  Lighting.Model._save();
+
+  Lighting.Render.draw();
+
+  revealBtn.style.opacity =
+    Lighting.Model.masterReveal ? '1' : '0.7';
+});
+
+revealBtn.style.opacity =
+  Lighting.Model.masterReveal ? '1' : '0.7';
     grid.appendChild(revealBtn);
 
     section.appendChild(grid);

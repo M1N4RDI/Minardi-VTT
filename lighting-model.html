@@ -8,9 +8,10 @@ Lighting.Model = {
   gridSize:     50,
   objects:      [],   // [{ id, name, shape, mode, locked, visible, ... }]
   walls:        [],   // [{ id, name, points:[{x,y}…], locked, visible }]
-  _nextId:      1,
-  masterReveal: false,
-  selectedWallId: null,   // parede selecionada (null = nenhuma)
+  _nextId:        1,
+  masterReveal:   false,
+  fogEnabled:     false,   // controla se o fog of war está ativo
+  selectedWallId: null,    // parede selecionada (null = nenhuma)
 
   // ── CRUD objetos (dark/light) ────────────────────────────────
   addObject(props) {
@@ -180,6 +181,7 @@ Lighting.Model = {
         objects:      this.objects,
         walls:        this.walls,
         masterReveal: this.masterReveal,
+        fogEnabled:   this.fogEnabled,
         _nextId:      this._nextId,
       });
       localStorage.setItem('lighting_state_v3', payload);
@@ -198,9 +200,39 @@ Lighting.Model = {
       const raw = localStorage.getItem('lighting_state_v3');
       if (!raw) return;
       const s           = JSON.parse(raw);
-      this.objects      = s.objects      || [];
       this.masterReveal = s.masterReveal || false;
+      this.fogEnabled   = s.fogEnabled   || false;
       this._nextId      = s._nextId      || 1;
+
+      // Bug #5 — migração de objetos antigos
+      // Campos antigos: lightDiameter, penumbraDiameter  →  luminosity, penumbra
+      // Campos antigos: (sem radius em dark circle)      →  radius derivado de penumbraDiameter
+      this.objects = (s.objects || []).map(obj => {
+        const o = Object.assign({}, obj);
+        if (o.shape === 'circle') {
+          if (o.mode === 'light') {
+            // light circle: lightDiameter → luminosity, penumbraDiameter → penumbra
+            if (o.lightDiameter   !== undefined && o.luminosity === undefined) {
+              o.luminosity = o.lightDiameter;
+            }
+            if (o.penumbraDiameter !== undefined && o.penumbra === undefined) {
+              o.penumbra = o.penumbraDiameter;
+            }
+          } else {
+            // dark circle: radius era derivado de penumbraDiameter ou lightDiameter
+            if (o.radius === undefined) {
+              if (o.penumbraDiameter !== undefined) {
+                o.radius = o.penumbraDiameter / 2;
+              } else if (o.lightDiameter !== undefined) {
+                o.radius = o.lightDiameter / 2;
+              } else {
+                o.radius = 4; // fallback seguro em quadrados
+              }
+            }
+          }
+        }
+        return o;
+      });
 
       // Migração: paredes antigas {p1,p2} → {points:[p1,p2]}
       this.walls = (s.walls || []).map(w => {
