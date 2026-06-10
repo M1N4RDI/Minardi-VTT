@@ -7,7 +7,7 @@ window.Lighting = window.Lighting || {};
 Lighting.Render = {
   _canvas:  null,
   _ctx:     null,
-  _off:     null,
+  _off:     null,     // canvas offscreen para composição
   _offCtx:  null,
 
   init() {
@@ -15,19 +15,17 @@ Lighting.Render = {
     const map = document.getElementById('map-container');
     if (!map) { setTimeout(() => this.init(), 200); return; }
 
-    let c = document.getElementById('lighting-overlay-canvas');
-    if (!c) {
-      c = document.createElement('canvas');
-      c.id = 'lighting-overlay-canvas';
-      c.style.cssText =
-        'position:absolute;top:0;left:0;width:100%;height:100%;' +
-        'pointer-events:none;z-index:999;';
-      map.appendChild(c);
-    }
-    this._canvas = c;
-    this._ctx    = c.getContext('2d');
-    this._off    = document.createElement('canvas');
-    this._offCtx = this._off.getContext('2d');
+    const c = document.createElement('canvas');
+    c.id = 'lighting-overlay-canvas';
+    c.style.cssText =
+      'position:absolute;top:0;left:0;width:100%;height:100%;' +
+      'pointer-events:none;z-index:999;';
+    map.appendChild(c);
+
+    this._canvas  = c;
+    this._ctx     = c.getContext('2d');
+    this._off     = document.createElement('canvas');
+    this._offCtx  = this._off.getContext('2d');
 
     this._sync();
     const ro = new ResizeObserver(() => this._sync());
@@ -38,16 +36,14 @@ Lighting.Render = {
   _sync() {
     const map = document.getElementById('map-container');
     if (!map || !this._canvas) return;
-    const w = map.offsetWidth  || map.clientWidth  || 800;
-    const h = map.offsetHeight || map.clientHeight || 600;
-    if (this._canvas.width !== w || this._canvas.height !== h) {
-      this._canvas.width = w; this._canvas.height = h;
-      this._off.width    = w; this._off.height    = h;
-    }
+    const w = map.clientWidth  || map.offsetWidth  || 800;
+    const h = map.clientHeight || map.offsetHeight || 600;
+    this._canvas.width  = w;  this._canvas.height  = h;
+    this._off.width     = w;  this._off.height     = h;
     this.draw();
   },
 
-  // Mantido para compatibilidade com chamadas existentes
+  // Mantido por compatibilidade — não mais necessário com points[]
   buildSpatialIndex() {},
 
   // ── Pipeline principal ───────────────────────────────────────
@@ -60,202 +56,183 @@ Lighting.Render = {
 
     ctx.clearRect(0, 0, W, H);
 
+    // Sem fog: só mostra paredes e UI
     if (!Lighting.Model.fogEnabled) {
       this._drawWalls(ctx);
-      this._drawUI();
+      this._drawUI(ctx);
       return;
     }
 
+    // Master reveal: overlay leve + paredes
     if (Lighting.Model.masterReveal) {
-      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.fillStyle = 'rgba(0,0,0,0.15)';
       ctx.fillRect(0, 0, W, H);
       this._drawWalls(ctx);
-      this._drawUI();
+      this._drawUI(ctx);
       return;
     }
 
     const darkObjs  = Lighting.Model.objects.filter(o => o.visible && o.mode === 'dark');
     const lightObjs = Lighting.Model.objects.filter(o => o.visible && o.mode === 'light');
 
+    console.log('[Lighting.Render.draw]', {
+      fogEnabled: Lighting.Model.fogEnabled,
+      objects:    Lighting.Model.objects.length,
+      dark:       darkObjs.length,
+      light:      lightObjs.length,
+      W, H,
+    });
+
+    // Sem áreas escuras: nada a fazer
     if (darkObjs.length === 0) {
       this._drawWalls(ctx);
-      this._drawUI();
+      this._drawUI(ctx);
       return;
     }
 
-    // ── Offscreen ────────────────────────────────────────────
-    const off    = this._off;
+    // ── Offscreen: constrói a máscara ────────────────────────
     const offCtx = this._offCtx;
     offCtx.clearRect(0, 0, W, H);
 
-    // Passo 1: sombra
+    // Passo 1 — pinta escuridão
     offCtx.globalCompositeOperation = 'source-over';
-    offCtx.fillStyle = 'rgba(0,0,0,1)';
     darkObjs.forEach(obj => this._fillDarkShape(offCtx, obj));
 
-    // Passo 2: recorte de luz
-    const gs           = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
-    const penumOpacity = Lighting.Model.penumbraOpacity !== undefined
-                         ? Lighting.Model.penumbraOpacity : 0.9;
+    // Passo 2 — recorta luz (destination-out)
+    const gs = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
 
     lightObjs.forEach(obj => {
+      offCtx.save();
+      offCtx.globalCompositeOperation = 'destination-out';
+
       if (obj.shape === 'circle') {
-        const lightR = ((obj.luminosity   || 4) / 2) * gs;
-        const penumR = ((obj.penumbra     || 8) / 2) * gs;
+        // luminosity e penumbra estão em QUADRADOS DE GRID
+        const lightR = (obj.luminosity || 6)  * gs;
+        const penumR = (obj.penumbra   || 12) * gs;
         const cx = obj.x, cy = obj.y;
 
+        // Penumbra: gradiente do raio de luz até o raio de penumbra
         if (penumR > lightR) {
-          offCtx.save();
-          offCtx.globalCompositeOperation = 'destination-out';
-          const stopFinal = 1 - penumOpacity;
           const grad = offCtx.createRadialGradient(cx, cy, lightR, cx, cy, penumR);
-          grad.addColorStop(0,   'rgba(0,0,0,1)');
-          grad.addColorStop(0.5, `rgba(0,0,0,${(1 - penumOpacity * 0.5).toFixed(3)})`);
-          grad.addColorStop(1,   `rgba(0,0,0,${stopFinal.toFixed(3)})`);
+          grad.addColorStop(0, 'rgba(0,0,0,1)');
+          grad.addColorStop(1, 'rgba(0,0,0,0)');
           offCtx.fillStyle = grad;
           offCtx.beginPath();
           offCtx.arc(cx, cy, penumR, 0, Math.PI * 2);
           offCtx.fill();
-          offCtx.restore();
         }
 
-        offCtx.save();
-        offCtx.globalCompositeOperation = 'destination-out';
+        // Núcleo de luz total
         offCtx.fillStyle = 'rgba(0,0,0,1)';
         offCtx.beginPath();
         offCtx.arc(cx, cy, lightR, 0, Math.PI * 2);
         offCtx.fill();
-        offCtx.restore();
 
       } else {
-        offCtx.save();
-        offCtx.globalCompositeOperation = 'destination-out';
+        // rect / polygon: recorte direto
         offCtx.fillStyle = 'rgba(0,0,0,1)';
         this._fillLightShape(offCtx, obj);
-        offCtx.restore();
       }
+
+      offCtx.restore();
     });
 
-    // Passo 3: copia para o canvas visível
+    // Passo 3 — copia máscara para o canvas visível
     ctx.globalCompositeOperation = 'source-over';
-    ctx.drawImage(off, 0, 0);
+    ctx.drawImage(this._off, 0, 0);
 
-    // Passo 4: paredes e UI
+    // Passo 4 — paredes e UI por cima
     this._drawWalls(ctx);
-    this._drawUI();
+    this._drawUI(ctx);
   },
 
-  // ── Shapes de escuridão ──────────────────────────────────────
+  // ── Preenche forma escura ────────────────────────────────────
   _fillDarkShape(ctx, obj) {
+    const gs = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
     ctx.save();
-    if (obj.shape === 'rect' && obj.rotation) {
-      const cx = obj.x + (obj.width  || 100) / 2;
-      const cy = obj.y + (obj.height || 100) / 2;
-      ctx.translate(cx, cy);
-      ctx.rotate((obj.rotation || 0) * Math.PI / 180);
-      ctx.translate(-cx, -cy);
-    }
-    ctx.beginPath();
+    ctx.fillStyle = 'rgba(0,0,0,0.92)';
+
     if (obj.shape === 'rect') {
-      ctx.rect(obj.x, obj.y, obj.width || 100, obj.height || 100);
+      if (obj.rotation) {
+        const cx = obj.x + (obj.width  || 100) / 2;
+        const cy = obj.y + (obj.height || 100) / 2;
+        ctx.translate(cx, cy);
+        ctx.rotate(obj.rotation * Math.PI / 180);
+        ctx.translate(-cx, -cy);
+      }
+      ctx.fillRect(obj.x, obj.y, obj.width || 100, obj.height || 100);
+
     } else if (obj.shape === 'circle') {
-      const gs = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
-      const r  = (obj.radius || 4) * gs;
+      // radius está em PIXELS (como o usuário arrastou no canvas)
+      const r = obj.radius || 50;
+      ctx.beginPath();
       ctx.arc(obj.x, obj.y, r, 0, Math.PI * 2);
+      ctx.fill();
+
     } else if (obj.shape === 'polygon' && obj.points?.length >= 3) {
+      ctx.beginPath();
       ctx.moveTo(obj.points[0].x, obj.points[0].y);
       for (let i = 1; i < obj.points.length; i++) ctx.lineTo(obj.points[i].x, obj.points[i].y);
       ctx.closePath();
+      ctx.fill();
     }
-    ctx.fill();
+
     ctx.restore();
   },
 
-  // ── Shapes de luz não-circulares ─────────────────────────────
+  // ── Preenche forma de luz (rect/polygon) ─────────────────────
   _fillLightShape(ctx, obj) {
     ctx.save();
-    if (obj.shape === 'rect' && obj.rotation) {
-      const cx = obj.x + (obj.width  || 100) / 2;
-      const cy = obj.y + (obj.height || 100) / 2;
-      ctx.translate(cx, cy);
-      ctx.rotate((obj.rotation || 0) * Math.PI / 180);
-      ctx.translate(-cx, -cy);
-    }
-    ctx.beginPath();
-    if (obj.shape === 'rect') {
-      ctx.rect(obj.x, obj.y, obj.width || 100, obj.height || 100);
-    } else if (obj.shape === 'polygon' && obj.points?.length >= 3) {
-      ctx.moveTo(obj.points[0].x, obj.points[0].y);
-      for (let i = 1; i < obj.points.length; i++) ctx.lineTo(obj.points[i].x, obj.points[i].y);
-      ctx.closePath();
-    }
-    ctx.fill();
-    ctx.restore();
-  },
+    ctx.fillStyle = 'rgba(0,0,0,1)';
 
-  // ── Stroke de seleção de objetos ─────────────────────────────
-  _strokeShape(ctx, obj) {
-    ctx.save();
-    if (obj.shape === 'rect' && obj.rotation) {
-      const cx = obj.x + (obj.width  || 100) / 2;
-      const cy = obj.y + (obj.height || 100) / 2;
-      ctx.translate(cx, cy);
-      ctx.rotate((obj.rotation || 0) * Math.PI / 180);
-      ctx.translate(-cx, -cy);
-    }
-    ctx.beginPath();
-    const gs = window.VTTGrid?.size || 50;
     if (obj.shape === 'rect') {
-      ctx.rect(obj.x, obj.y, obj.width || 100, obj.height || 100);
-    } else if (obj.shape === 'circle') {
-      // Para dark: radius em quadrados; para light: luminosity em quadrados
-      const r = obj.mode === 'dark'
-        ? (obj.radius    || 4) * gs
-        : ((obj.luminosity || 4) / 2) * gs;
-      ctx.arc(obj.x, obj.y, r, 0, Math.PI * 2);
+      if (obj.rotation) {
+        const cx = obj.x + (obj.width  || 100) / 2;
+        const cy = obj.y + (obj.height || 100) / 2;
+        ctx.translate(cx, cy);
+        ctx.rotate(obj.rotation * Math.PI / 180);
+        ctx.translate(-cx, -cy);
+      }
+      ctx.fillRect(obj.x, obj.y, obj.width || 100, obj.height || 100);
+
     } else if (obj.shape === 'polygon' && obj.points?.length >= 3) {
+      ctx.beginPath();
       ctx.moveTo(obj.points[0].x, obj.points[0].y);
       for (let i = 1; i < obj.points.length; i++) ctx.lineTo(obj.points[i].x, obj.points[i].y);
       ctx.closePath();
+      ctx.fill();
     }
-    ctx.stroke();
+
     ctx.restore();
   },
 
   // ── Paredes ──────────────────────────────────────────────────
   _drawWalls(ctx) {
     if (!Lighting.Model.walls?.length) return;
-
-    const selectedWallId = Lighting.Model.selectedWallId;
+    const selId = Lighting.Model.selectedWallId;
 
     ctx.save();
     ctx.globalCompositeOperation = 'source-over';
 
     Lighting.Model.walls.forEach(wall => {
       if (!wall.visible || wall.points.length < 2) return;
+      const isSel = wall.id === selId;
 
-      const isSelected = wall.id === selectedWallId;
-
-      // Linha principal
       ctx.beginPath();
       ctx.moveTo(wall.points[0].x, wall.points[0].y);
       for (let i = 1; i < wall.points.length; i++) {
         ctx.lineTo(wall.points[i].x, wall.points[i].y);
       }
-      ctx.strokeStyle = isSelected
-        ? 'rgba(255,220,60,0.95)'
-        : 'rgba(255,80,80,0.85)';
-      ctx.lineWidth = isSelected ? 3 : 2;
+      ctx.strokeStyle = isSel ? 'rgba(255,220,60,0.95)' : 'rgba(255,80,80,0.85)';
+      ctx.lineWidth   = isSel ? 3 : 2;
       ctx.setLineDash([]);
       ctx.stroke();
 
       // Vértices
-      wall.points.forEach((p, i) => {
+      wall.points.forEach(p => {
         ctx.beginPath();
-        ctx.arc(p.x, p.y, isSelected ? 5 : 4, 0, Math.PI * 2);
-        ctx.fillStyle = isSelected
-          ? 'rgba(255,220,60,0.95)'
-          : 'rgba(255,80,80,0.9)';
+        ctx.arc(p.x, p.y, isSel ? 5 : 4, 0, Math.PI * 2);
+        ctx.fillStyle = isSel ? 'rgba(255,220,60,0.95)' : 'rgba(255,80,80,0.9)';
         ctx.fill();
       });
     });
@@ -263,85 +240,19 @@ Lighting.Render = {
     ctx.restore();
   },
 
-  // ── Handles de parede selecionada ────────────────────────────
-  _drawWallHandles(ctx, wall) {
-    if (!wall || wall.locked) return;
-
-    const input         = window.Lighting?.Input;
-    const selectedVtx   = input?.selectedVertexIndex;
-    const HANDLE_R      = 7;
-
-    ctx.save();
-    ctx.globalCompositeOperation = 'source-over';
-
-    // Handle de rotação (acima do centro geométrico)
-    const center = this._wallCenter(wall);
-    const rotH   = this._wallRotateHandlePos(wall);
-    if (rotH) {
-      ctx.beginPath();
-      ctx.arc(rotH.x, rotH.y, 7, 0, Math.PI * 2);
-      ctx.fillStyle   = 'rgba(200,100,255,0.9)';
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-      ctx.lineWidth   = 1;
-      ctx.fill();
-      ctx.stroke();
-      // linha do centro ao handle
-      ctx.beginPath();
-      ctx.moveTo(center.x, center.y);
-      ctx.lineTo(rotH.x, rotH.y);
-      ctx.strokeStyle = 'rgba(200,100,255,0.5)';
-      ctx.setLineDash([3, 3]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    // Handles de vértices
-    wall.points.forEach((p, i) => {
-      const isSel = (i === selectedVtx);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, HANDLE_R, 0, Math.PI * 2);
-      ctx.fillStyle   = isSel
-        ? 'rgba(255,100,80,0.95)'
-        : 'rgba(255,220,60,0.9)';
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-      ctx.lineWidth   = 1;
-      ctx.fill();
-      ctx.stroke();
-    });
-
-    // Midpoints (inserção de vértice)
-    ctx.setLineDash([]);
-    for (let i = 0; i < wall.points.length - 1; i++) {
-      const a  = wall.points[i];
-      const b  = wall.points[i + 1];
-      const mx = (a.x + b.x) / 2;
-      const my = (a.y + b.y) / 2;
-      ctx.beginPath();
-      ctx.arc(mx, my, 4, 0, Math.PI * 2);
-      ctx.fillStyle   = 'rgba(100,200,255,0.7)';
-      ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-      ctx.lineWidth   = 1;
-      ctx.fill();
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  },
-
-  // ── UI overlay (objetos + paredes) ───────────────────────────
-  _drawUI() {
+  // ── UI: seleção, handles, previews ──────────────────────────
+  _drawUI(ctx) {
     if (!window.Lighting?.Input) return;
 
-    const ctx        = this._ctx;
     const input      = Lighting.Input;
     const selectedId = input.selectedObjectId;
     const activeTool = input.activeTool;
-    const toolState  = input.toolState || {};
+    const ts         = input.toolState || {};
 
     ctx.save();
     ctx.globalCompositeOperation = 'source-over';
 
-    // Objeto selecionado
+    // Seleção de objeto
     if (selectedId) {
       const obj = Lighting.Model.getObject(selectedId);
       if (obj) {
@@ -350,258 +261,205 @@ Lighting.Render = {
         ctx.setLineDash([4, 3]);
         this._strokeShape(ctx, obj);
         ctx.setLineDash([]);
-        if (!obj.locked) {
-          this._drawHandles(ctx, obj);
-          if (obj.shape === 'rect' || obj.shape === 'polygon') {
-            this._drawRotateHandle(ctx, obj);
-          }
-        }
+        if (!obj.locked) this._drawHandles(ctx, obj);
       }
     }
 
-    // Parede selecionada
+    // Handles de parede selecionada
     const selWall = Lighting.Model.getWall(Lighting.Model.selectedWallId);
-    if (selWall) {
-      this._drawWallHandles(ctx, selWall);
-    }
+    if (selWall) this._drawWallHandles(ctx, selWall);
 
     // Previews de ferramentas
-    ctx.strokeStyle = 'rgba(80,220,120,0.9)';
-    ctx.fillStyle   = 'rgba(80,220,120,0.15)';
-    ctx.lineWidth   = 2;
     ctx.setLineDash([4, 4]);
 
-    if (activeTool === 'rect' && toolState.start && toolState.current) {
-      const x1 = Math.min(toolState.start.x, toolState.current.x);
-      const y1 = Math.min(toolState.start.y, toolState.current.y);
-      const w  = Math.abs(toolState.current.x - toolState.start.x);
-      const h  = Math.abs(toolState.current.y - toolState.start.y);
+    if (activeTool === 'rect' && ts.start && ts.current) {
+      const x1 = Math.min(ts.start.x, ts.current.x);
+      const y1 = Math.min(ts.start.y, ts.current.y);
+      const w  = Math.abs(ts.current.x - ts.start.x);
+      const h  = Math.abs(ts.current.y - ts.start.y);
+      ctx.strokeStyle = 'rgba(80,220,120,0.9)';
+      ctx.fillStyle   = 'rgba(80,220,120,0.15)';
+      ctx.lineWidth   = 2;
       ctx.fillRect(x1, y1, w, h);
       ctx.strokeRect(x1, y1, w, h);
     }
 
-    if (activeTool === 'circle' && toolState.start && toolState.current) {
-      const dx = toolState.current.x - toolState.start.x;
-      const dy = toolState.current.y - toolState.start.y;
-      const r  = Math.sqrt(dx * dx + dy * dy);
+    if (activeTool === 'circle' && ts.start && ts.current) {
+      const dx = ts.current.x - ts.start.x;
+      const dy = ts.current.y - ts.start.y;
+      const r  = Math.hypot(dx, dy);
+      ctx.strokeStyle = 'rgba(80,220,120,0.9)';
+      ctx.fillStyle   = 'rgba(80,220,120,0.15)';
+      ctx.lineWidth   = 2;
       ctx.beginPath();
-      ctx.arc(toolState.start.x, toolState.start.y, r, 0, Math.PI * 2);
+      ctx.arc(ts.start.x, ts.start.y, r, 0, Math.PI * 2);
       ctx.fill(); ctx.stroke();
     }
 
-    if (activeTool === 'polygon' && toolState.points?.length > 0) {
-      const pts = toolState.points;
-      ctx.save();
-      ctx.lineWidth   = 2;
+    if (activeTool === 'polygon' && ts.points?.length > 0) {
+      const pts = ts.points;
       ctx.strokeStyle = 'rgba(80,200,100,0.8)';
-      ctx.setLineDash([4, 4]);
+      ctx.lineWidth   = 2;
       ctx.beginPath();
       ctx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      if (toolState.current) ctx.lineTo(toolState.current.x, toolState.current.y);
+      if (ts.current) ctx.lineTo(ts.current.x, ts.current.y);
       ctx.stroke();
       ctx.setLineDash([]);
       pts.forEach((p, i) => {
-        const snapRadius = 12;
-        const cur        = toolState.current;
-        const nearFirst  = i === 0 && cur &&
-          Math.hypot(cur.x - pts[0].x, cur.y - pts[0].y) < snapRadius;
         ctx.beginPath();
         ctx.arc(p.x, p.y, i === 0 ? 7 : 5, 0, Math.PI * 2);
-        ctx.fillStyle = i === 0
-          ? (nearFirst ? 'rgba(255,140,0,1)' : 'rgba(255,200,50,0.95)')
-          : 'rgba(80,200,100,0.9)';
+        ctx.fillStyle = i === 0 ? 'rgba(255,200,50,0.95)' : 'rgba(80,200,100,0.9)';
         ctx.fill();
-        if (i === 0) {
-          ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-          ctx.lineWidth   = 1.5;
-          ctx.stroke();
-        }
       });
-      ctx.restore();
     }
 
-    if (activeTool === 'wall' && toolState.points?.length > 0) {
-      const pts = toolState.points;
-      ctx.save();
-      ctx.strokeStyle = 'rgba(255,100,100,0.9)';
-      ctx.lineWidth   = 3;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      if (toolState.current) ctx.lineTo(toolState.current.x, toolState.current.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      // vértices já colocados
-      pts.forEach(p => {
+    // Preview de parede em construção
+    // Suporta tanto toolState.p1 (formato antigo) quanto toolState.points[] (novo)
+    if (activeTool === 'wall') {
+      const pts = ts.points || (ts.p1 ? [ts.p1] : null);
+      if (pts?.length > 0) {
+        ctx.strokeStyle = 'rgba(255,100,100,0.9)';
+        ctx.lineWidth   = 3;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,100,100,0.9)';
-        ctx.fill();
-      });
-      ctx.restore();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        if (ts.current) ctx.lineTo(ts.current.x, ts.current.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        pts.forEach(p => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(255,100,100,0.9)';
+          ctx.fill();
+        });
+      }
     }
 
     ctx.setLineDash([]);
     ctx.restore();
   },
 
-  // ── Handles de objetos (rect/circle) ────────────────────────
-  getHandles(obj) {
-    const gs = window.VTTGrid?.size || 50;
-    if (obj.shape === 'rect') {
-      const { x, y } = obj;
-      const w   = obj.width  || 100;
-      const h   = obj.height || 100;
-      const rot = (obj.rotation || 0) * Math.PI / 180;
-      const cx  = x + w / 2, cy = y + h / 2;
-      const rot2d = (px, py) => {
-        const dx = px - cx, dy = py - cy;
-        return {
-          x: cx + dx * Math.cos(rot) - dy * Math.sin(rot),
-          y: cy + dx * Math.sin(rot) + dy * Math.cos(rot),
-        };
-      };
-      return [
-        { ...rot2d(x,       y      ), cursor: 'nw-resize', handleId: 'tl' },
-        { ...rot2d(x + w,   y      ), cursor: 'ne-resize', handleId: 'tr' },
-        { ...rot2d(x,       y + h  ), cursor: 'sw-resize', handleId: 'bl' },
-        { ...rot2d(x + w,   y + h  ), cursor: 'se-resize', handleId: 'br' },
-        { ...rot2d(x + w/2, y      ), cursor: 'n-resize',  handleId: 'tm' },
-        { ...rot2d(x + w/2, y + h  ), cursor: 's-resize',  handleId: 'bm' },
-        { ...rot2d(x,       y + h/2), cursor: 'w-resize',  handleId: 'ml' },
-        { ...rot2d(x + w,   y + h/2), cursor: 'e-resize',  handleId: 'mr' },
-      ];
-    }
-    if (obj.shape === 'circle') {
-      const lightR = ((obj.luminosity || 4) / 2) * gs;
-      const penumR = ((obj.penumbra   || 8) / 2) * gs;
-      return [
-        { x: obj.x + lightR, y: obj.y, cursor: 'ew-resize', handleId: 'light-r'  },
-        { x: obj.x,          y: obj.y, cursor: 'move',       handleId: 'center'   },
-        { x: obj.x + penumR, y: obj.y, cursor: 'ew-resize',  handleId: 'penum-r'  },
-      ];
-    }
-    return [];
-  },
-
-  getRotateHandlePos(obj) {
-    if (obj.shape !== 'rect' && obj.shape !== 'polygon') return null;
-    const bounds = this._getBounds(obj);
-    const center = this._getCenter(obj);
-    const rot    = (obj.rotation || 0) * Math.PI / 180;
-    const dy     = -(bounds.height / 2) - 22;
-    return {
-      x: center.x + (-dy) * Math.sin(rot) * -1,
-      y: center.y + dy * Math.cos(rot) * -1 * -1,
-    };
-  },
-
-  // Handle de rotação de parede (acima do centro)
-  _wallRotateHandlePos(wall) {
-    if (!wall || wall.points.length < 2) return null;
-    const center = this._wallCenter(wall);
-    // calcular bounding height para posicionar acima
-    let minY = Infinity, maxY = -Infinity;
-    wall.points.forEach(p => {
-      minY = Math.min(minY, p.y);
-      maxY = Math.max(maxY, p.y);
-    });
-    const h = maxY - minY;
-    return { x: center.x, y: center.y - h / 2 - 22 };
-  },
-
-  _wallCenter(wall) {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    wall.points.forEach(p => {
-      minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
-      maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
-    });
-    return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
-  },
-
-  _drawHandles(ctx, obj) {
-    const gs = window.VTTGrid?.size || 50;
+  // ── Stroke de seleção ────────────────────────────────────────
+  _strokeShape(ctx, obj) {
+    const gs = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
     ctx.save();
-    ctx.globalCompositeOperation = 'source-over';
-    this.getHandles(obj).forEach(h => {
-      if      (h.handleId === 'light-r')  ctx.fillStyle = 'rgba(255,230,80,0.95)';
-      else if (h.handleId === 'penum-r')  ctx.fillStyle = 'rgba(255,150,50,0.85)';
-      else if (h.handleId === 'center')   ctx.fillStyle = 'rgba(100,200,255,0.85)';
-      else                                ctx.fillStyle = 'rgba(255,255,255,0.9)';
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-      ctx.lineWidth   = 1;
+
+    if (obj.shape === 'rect') {
+      if (obj.rotation) {
+        const cx = obj.x + (obj.width  || 100) / 2;
+        const cy = obj.y + (obj.height || 100) / 2;
+        ctx.translate(cx, cy);
+        ctx.rotate(obj.rotation * Math.PI / 180);
+        ctx.translate(-cx, -cy);
+      }
+      ctx.strokeRect(obj.x, obj.y, obj.width || 100, obj.height || 100);
+
+    } else if (obj.shape === 'circle') {
+      const r = obj.mode === 'dark'
+        ? (obj.radius || 50)                  // dark: pixels
+        : (obj.luminosity || 6) * gs;         // light: quadrados → pixels
       ctx.beginPath();
-      ctx.arc(h.x, h.y, 6, 0, Math.PI * 2);
-      ctx.fill(); ctx.stroke();
-    });
-    if (obj.shape === 'circle') {
-      const lightR = ((obj.luminosity || 4) / 2) * gs;
-      const penumR = ((obj.penumbra   || 8) / 2) * gs;
-      ctx.setLineDash([3, 3]);
-      ctx.lineWidth   = 1;
-      ctx.strokeStyle = 'rgba(255,230,80,0.6)';
-      ctx.beginPath(); ctx.arc(obj.x, obj.y, lightR, 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = 'rgba(255,150,50,0.4)';
-      ctx.beginPath(); ctx.arc(obj.x, obj.y, penumR, 0, Math.PI * 2); ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.arc(obj.x, obj.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+
+    } else if (obj.shape === 'polygon' && obj.points?.length >= 3) {
+      ctx.beginPath();
+      ctx.moveTo(obj.points[0].x, obj.points[0].y);
+      for (let i = 1; i < obj.points.length; i++) ctx.lineTo(obj.points[i].x, obj.points[i].y);
+      ctx.closePath();
+      ctx.stroke();
     }
+
     ctx.restore();
   },
 
-  _drawRotateHandle(ctx, obj) {
-    const rh = this.getRotateHandlePos(obj);
-    if (!rh) return;
-    const center = this._getCenter(obj);
+  // ── Handles de objetos ───────────────────────────────────────
+  _drawHandles(ctx, obj) {
+    const hs = 8;
     ctx.save();
     ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle   = 'rgba(200,100,255,0.9)';
+    ctx.fillStyle   = 'rgba(255,220,100,0.9)';
     ctx.strokeStyle = 'rgba(0,0,0,0.5)';
     ctx.lineWidth   = 1;
-    ctx.beginPath(); ctx.arc(rh.x, rh.y, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.strokeStyle = 'rgba(200,100,255,0.5)';
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath(); ctx.moveTo(center.x, center.y); ctx.lineTo(rh.x, rh.y); ctx.stroke();
-    ctx.setLineDash([]);
+
+    if (obj.shape === 'rect') {
+      const corners = [
+        [obj.x,              obj.y             ],
+        [obj.x + obj.width,  obj.y             ],
+        [obj.x,              obj.y + obj.height],
+        [obj.x + obj.width,  obj.y + obj.height],
+      ];
+      corners.forEach(([cx, cy]) => {
+        ctx.fillRect(cx - hs/2, cy - hs/2, hs, hs);
+      });
+
+    } else if (obj.shape === 'circle') {
+      const gs = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
+      const r  = obj.mode === 'dark'
+        ? (obj.radius || 50)
+        : (obj.luminosity || 6) * gs;
+      // Handle central
+      ctx.beginPath(); ctx.arc(obj.x, obj.y, hs/2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      // Handle de raio
+      ctx.fillStyle = 'rgba(255,180,50,0.9)';
+      ctx.beginPath(); ctx.arc(obj.x + r, obj.y, hs/2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      // Preview do raio
+      ctx.strokeStyle = 'rgba(255,220,100,0.4)';
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.arc(obj.x, obj.y, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      // Para círculos de luz: handle e preview de penumbra
+      if (obj.mode === 'light') {
+        const penumR = (obj.penumbra || 12) * gs;
+        ctx.fillStyle = 'rgba(255,120,50,0.8)';
+        ctx.beginPath(); ctx.arc(obj.x + penumR, obj.y, hs/2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,150,50,0.3)';
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.arc(obj.x, obj.y, penumR, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+    } else if (obj.shape === 'polygon' && obj.points) {
+      obj.points.forEach(p => {
+        ctx.beginPath(); ctx.arc(p.x, p.y, hs/2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      });
+    }
+
     ctx.restore();
   },
 
-  // ── Helpers geométricos ──────────────────────────────────────
-  _getBounds(obj) {
-    if (obj.shape === 'rect') {
-      return {
-        minX: obj.x, minY: obj.y,
-        maxX: obj.x + (obj.width  || 100),
-        maxY: obj.y + (obj.height || 100),
-        width:  obj.width  || 100,
-        height: obj.height || 100,
-      };
-    }
-    if (obj.shape === 'polygon' && obj.points?.length) {
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      obj.points.forEach(p => {
-        minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
-        maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
-      });
-      return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
-    }
-    return { minX: 0, minY: 0, maxX: 0, maxY: 0, width: 0, height: 0 };
-  },
+  // ── Handles de parede selecionada ────────────────────────────
+  _drawWallHandles(ctx, wall) {
+    if (!wall || wall.locked) return;
+    const HANDLE_R = 7;
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
 
-  _getCenter(obj) {
-    if (obj.shape === 'polygon' && obj.points?.length) {
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      obj.points.forEach(p => {
-        minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
-        maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
-      });
-      return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    wall.points.forEach((p, i) => {
+      const isSel = (i === Lighting.Input?.selectedVertexIndex);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, HANDLE_R, 0, Math.PI * 2);
+      ctx.fillStyle   = isSel ? 'rgba(255,100,80,0.95)' : 'rgba(255,220,60,0.9)';
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.lineWidth   = 1;
+      ctx.fill();
+      ctx.stroke();
+    });
+
+    // Midpoints (inserção de vértice)
+    for (let i = 0; i < wall.points.length - 1; i++) {
+      const a  = wall.points[i], b = wall.points[i+1];
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      ctx.beginPath();
+      ctx.arc(mx, my, 4, 0, Math.PI * 2);
+      ctx.fillStyle   = 'rgba(100,200,255,0.7)';
+      ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+      ctx.fill();
+      ctx.stroke();
     }
-    return {
-      x: obj.x + (obj.width  || 100) / 2,
-      y: obj.y + (obj.height || 100) / 2,
-    };
+
+    ctx.restore();
   },
 };
 

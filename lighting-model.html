@@ -5,15 +5,15 @@ console.log('lighting-model carregado');
 window.Lighting = window.Lighting || {};
 
 Lighting.Model = {
-  gridSize:     50,
-  objects:      [],   // [{ id, name, shape, mode, locked, visible, ... }]
-  walls:        [],   // [{ id, name, points:[{x,y}…], locked, visible }]
+  gridSize:       50,
+  objects:        [],   // [{ id, name, shape, mode, locked, visible, ... }]
+  walls:          [],   // [{ id, name, points:[{x,y}…], locked, visible }]
   _nextId:        1,
   masterReveal:   false,
-  fogEnabled:     false,   // controla se o fog of war está ativo
-  selectedWallId: null,    // parede selecionada (null = nenhuma)
+  fogEnabled:     false,   // liga/desliga o fog of war
+  selectedWallId: null,
 
-  // ── CRUD objetos (dark/light) ────────────────────────────────
+  // ── CRUD objetos ─────────────────────────────────────────────
   addObject(props) {
     const id  = this._nextId++;
     const obj = Object.assign({
@@ -26,12 +26,17 @@ Lighting.Model = {
       lightSource: props.lightSource || false,
       x:           props.x      || 0,
       y:           props.y      || 0,
+      // rect
       width:       props.width  || 100,
       height:      props.height || 100,
+      rotation:    props.rotation || 0,
+      // circle dark → radius em pixels
       radius:      props.radius || 50,
+      // circle light → luminosity e penumbra em quadrados de grid
       luminosity:  props.luminosity  || 6,
       penumbra:    props.penumbra    || 12,
-      points:      props.points      || [],
+      // polygon
+      points:      props.points || [],
     }, props);
     this.objects.push(obj);
     return obj;
@@ -67,18 +72,18 @@ Lighting.Model = {
   duplicateObject(id) {
     const orig = this.getObject(id);
     if (!orig) return null;
-    const copy    = Object.assign({}, orig);
-    copy.id       = this._nextId++;
-    copy.name     = 'Cópia de ' + orig.name;
-    copy.x       += this.gridSize * 0.5;
-    copy.y       += this.gridSize * 0.5;
+    const copy  = Object.assign({}, orig);
+    copy.id     = this._nextId++;
+    copy.name   = 'Cópia de ' + orig.name;
+    copy.x     += this.gridSize * 0.5;
+    copy.y     += this.gridSize * 0.5;
     if (copy.points) copy.points = copy.points.map(p => ({ x: p.x, y: p.y }));
     this.objects.push(copy);
     return copy;
   },
 
   // ── CRUD paredes ─────────────────────────────────────────────
-  // points: [{x,y}, {x,y}, …]  — mínimo 2, sem limite máximo
+  // points: [{x,y}, …] — mínimo 2
 
   addWall(points, name) {
     if (!points || points.length < 2) return null;
@@ -125,48 +130,35 @@ Lighting.Model = {
     return copy;
   },
 
-  // Insere novo vértice entre os índices i e i+1
   insertWallVertex(wallId, afterIndex) {
     const wall = this.getWall(wallId);
     if (!wall) return;
     const a   = wall.points[afterIndex];
     const b   = wall.points[afterIndex + 1];
     if (!a || !b) return;
-    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     const pts = wall.points.slice();
-    pts.splice(afterIndex + 1, 0, mid);
+    pts.splice(afterIndex + 1, 0, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
     this.updateWall(wallId, { points: pts });
   },
 
-  // Remove vértice pelo índice (garante mínimo de 2 pontos)
   removeWallVertex(wallId, index) {
     const wall = this.getWall(wallId);
     if (!wall || wall.points.length <= 2) return;
-    const pts = wall.points.filter((_, i) => i !== index);
-    this.updateWall(wallId, { points: pts });
+    this.updateWall(wallId, { points: wall.points.filter((_, i) => i !== index) });
   },
 
-  // Seleção
-  selectWall(id) {
-    this.selectedWallId = id;
-  },
+  selectWall(id)      { this.selectedWallId = id; },
+  clearWallSelection(){ this.selectedWallId = null; },
 
-  clearWallSelection() {
-    this.selectedWallId = null;
-  },
-
-  // Retorna segmentos [{x1,y1,x2,y2}] de todas as paredes visíveis
-  // (interface futura para raycasting)
+  // Interface futura para raycasting
   getWallSegments() {
     const segs = [];
     for (const wall of this.walls) {
       if (!wall.visible) continue;
       for (let i = 0; i < wall.points.length - 1; i++) {
         segs.push({
-          x1: wall.points[i].x,
-          y1: wall.points[i].y,
-          x2: wall.points[i + 1].x,
-          y2: wall.points[i + 1].y,
+          x1: wall.points[i].x,     y1: wall.points[i].y,
+          x2: wall.points[i+1].x,   y2: wall.points[i+1].y,
           wallId: wall.id,
         });
       }
@@ -204,29 +196,25 @@ Lighting.Model = {
       this.fogEnabled   = s.fogEnabled   || false;
       this._nextId      = s._nextId      || 1;
 
-      // Bug #5 — migração de objetos antigos
-      // Campos antigos: lightDiameter, penumbraDiameter  →  luminosity, penumbra
-      // Campos antigos: (sem radius em dark circle)      →  radius derivado de penumbraDiameter
+      // Migração de objetos: campos antigos → novos
       this.objects = (s.objects || []).map(obj => {
         const o = Object.assign({}, obj);
         if (o.shape === 'circle') {
           if (o.mode === 'light') {
-            // light circle: lightDiameter → luminosity, penumbraDiameter → penumbra
-            if (o.lightDiameter   !== undefined && o.luminosity === undefined) {
+            // lightDiameter → luminosity (em quadrados: diâmetro / 2 → raio / gridSize)
+            if (o.lightDiameter !== undefined && o.luminosity === undefined) {
               o.luminosity = o.lightDiameter;
             }
             if (o.penumbraDiameter !== undefined && o.penumbra === undefined) {
               o.penumbra = o.penumbraDiameter;
             }
           } else {
-            // dark circle: radius era derivado de penumbraDiameter ou lightDiameter
-            if (o.radius === undefined) {
+            // dark circle: garantir que radius existe em pixels
+            if (o.radius === undefined || o.radius === 50) {
               if (o.penumbraDiameter !== undefined) {
-                o.radius = o.penumbraDiameter / 2;
+                o.radius = (o.penumbraDiameter / 2) * (this.gridSize || 50);
               } else if (o.lightDiameter !== undefined) {
-                o.radius = o.lightDiameter / 2;
-              } else {
-                o.radius = 4; // fallback seguro em quadrados
+                o.radius = (o.lightDiameter / 2) * (this.gridSize || 50);
               }
             }
           }
@@ -234,9 +222,9 @@ Lighting.Model = {
         return o;
       });
 
-      // Migração: paredes antigas {p1,p2} → {points:[p1,p2]}
+      // Migração de paredes: formato antigo {p1,p2} → {points:[…]}
       this.walls = (s.walls || []).map(w => {
-        if (w.points) return w;                       // já novo formato
+        if (w.points) return w;
         return {
           id:      w.id,
           name:    w.name || ('Parede ' + w.id),
