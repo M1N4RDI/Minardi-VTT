@@ -24,6 +24,12 @@ Lighting.Input = {
   // }
 
   _getCenter(obj) {
+    // Para polígonos, o centro correto é o centróide da bounding box dos pontos.
+    // Delegamos para Lighting.Render._getCenter que já implementa isso corretamente.
+    if (window.Lighting && Lighting.Render && Lighting.Render._getCenter) {
+      return Lighting.Render._getCenter(obj);
+    }
+    // Fallback para rect/circle
     return {
       x: obj.x + (obj.width || 100) / 2,
       y: obj.y + (obj.height || 100) / 2
@@ -282,95 +288,85 @@ if (this.activeTool === 'polygon') {
 
   // ── Mouse Move ───────────────────────────────────────────────
   _onMouseMove(e) {
-  if (!window.VTTMode || !VTTMode.is('lighting')) return;
-  const pt = this._pt(e);
+    if (!window.VTTMode || !VTTMode.is('lighting')) return;
+    const pt = this._pt(e);
 
- 
+    // ── Drag ativo ────────────────────────────────────────────
+    if (this._drag) {
+      const drag = this._drag;
+      const obj  = Lighting.Model.getObject(drag.objId);
+      if (!obj) { this._drag = null; return; }
 
-  if (this._drag) {
-    const drag = this._drag;
-    const obj  = Lighting.Model.getObject(drag.objId);
-    if (!obj) { this._drag = null; return; }
+      if (drag.type === 'move') {
+        const dx = pt.x - drag.startPt.x;
+        const dy = pt.y - drag.startPt.y;
+        Lighting.Model.updateObject(obj.id, {
+          x: drag.startObj.x + dx,
+          y: drag.startObj.y + dy,
+        });
 
-    if (drag.type === 'move') {
-      const dx = pt.x - drag.startPt.x;
-      const dy = pt.y - drag.startPt.y;
-      Lighting.Model.updateObject(obj.id, {
-        x: drag.startObj.x + dx,
-        y: drag.startObj.y + dy,
-      });
+      } else if (drag.type === 'poly-move') {
+        const dx = pt.x - drag.startPt.x;
+        const dy = pt.y - drag.startPt.y;
+        Lighting.Model.updateObject(obj.id, {
+          points: drag.startObj.points.map(p => ({ x: p.x + dx, y: p.y + dy })),
+        });
 
-    } else if (drag.type === 'poly-move') {
-      const dx = pt.x - drag.startPt.x;
-      const dy = pt.y - drag.startPt.y;
-      Lighting.Model.updateObject(obj.id, {
-        points: drag.startObj.points.map(p => ({ x: p.x + dx, y: p.y + dy })),
-      });
+      } else if (drag.type === 'poly-vertex') {
+        const newPoints = obj.points.map((p, i) =>
+          i === drag.vertexIdx ? { x: pt.x, y: pt.y } : { ...p }
+        );
+        Lighting.Model.updateObject(obj.id, { points: newPoints });
 
-    } else if (drag.type === 'poly-vertex') {
-      const newPoints = obj.points.map((p, i) =>
-        i === drag.vertexIdx ? { x: pt.x, y: pt.y } : { ...p }
-      );
-      Lighting.Model.updateObject(obj.id, { points: newPoints });
+      } else if (drag.type === 'rotate') {
+        const cx = drag.cx;
+        const cy = drag.cy;
+        const angle = Math.atan2(pt.y - cy, pt.x - cx) * 180 / Math.PI;
+        const delta = angle - drag.startAngle;
+        const rad   = delta * Math.PI / 180;
 
-    }  else if (drag.type === 'rotate') {
-  const cx = drag.cx;
-  const cy = drag.cy;
+        if (drag.startPoints) {
+          // Polígono: rotaciona cada ponto em torno do centro capturado no início do drag
+          const newPoints = drag.startPoints.map(p => {
+            const dx = p.x - cx;
+            const dy = p.y - cy;
+            return {
+              x: cx + dx * Math.cos(rad) - dy * Math.sin(rad),
+              y: cy + dx * Math.sin(rad) + dy * Math.cos(rad),
+            };
+          });
+          Lighting.Model.updateObject(obj.id, { points: newPoints });
+        } else {
+          // Rect: atualiza propriedade rotation
+          Lighting.Model.updateObject(obj.id, {
+            rotation: ((drag.startRotation + delta) % 360 + 360) % 360,
+          });
+        }
 
-  const angle = Math.atan2(pt.y - cy, pt.x - cx) * 180 / Math.PI;
-  const delta = angle - drag.startAngle;
-  const rad = delta * Math.PI / 180;
+      } else if (drag.type === 'handle') {
+        this._applyHandle(obj, drag.handleId, pt, drag.startObj, drag.startPt);
+      }
 
-  if (drag.startPoints) {
-    const newPoints = drag.startPoints.map(p => {
-      const dx = p.x - cx;
-      const dy = p.y - cy;
-
-      return {
-        x: cx + dx * Math.cos(rad) - dy * Math.sin(rad),
-        y: cy + dx * Math.sin(rad) + dy * Math.cos(rad),
-      };
-    });
-
-    Lighting.Model.updateObject(obj.id, { points: newPoints });
-  } else {
-    Lighting.Model.updateObject(obj.id, {
-      rotation: ((drag.startRotation + delta) % 360 + 360) % 360,
-    });
-  }
-
-  Lighting.Render.draw();
-  return;
-}
-
-
-
-    } else if (drag.type === 'handle') {
-      this._applyHandle(obj, drag.handleId, pt, drag.startObj);
+      Lighting.Render.draw();
+      return;
     }
 
-     
+    // ── Previews de ferramentas sem drag ativo ────────────────
+    if (this.activeTool === 'rect' && this.toolState.start) {
+      this.toolState.current = pt; Lighting.Render.draw(); return;
+    }
+    if (this.activeTool === 'circle' && this.toolState.start) {
+      this.toolState.current = pt; Lighting.Render.draw(); return;
+    }
+    if (this.activeTool === 'wall' && this.toolState.p1) {
+      this.toolState.current = pt; Lighting.Render.draw(); return;
+    }
+    if (this.activeTool === 'polygon' && this.toolState.points) {
+      this.toolState.current = pt; Lighting.Render.draw(); return;
+    }
 
     Lighting.Render.draw();
-    return;
-  
-
-  // Previews de ferramentas sem drag ativo
-  if (this.activeTool === 'rect' && this.toolState.start) {
-    this.toolState.current = pt; Lighting.Render.draw(); return;
-  }
-  if (this.activeTool === 'circle' && this.toolState.start) {
-    this.toolState.current = pt; Lighting.Render.draw(); return;
-  }
-  if (this.activeTool === 'wall' && this.toolState.p1) {
-    this.toolState.current = pt; Lighting.Render.draw(); return;
-  }
-  if (this.activeTool === 'polygon' && this.toolState.points) {
-    this.toolState.current = pt; Lighting.Render.draw(); return;
-  }
-
-  Lighting.Render.draw();
-  }, 
+  },
 
   // ── Mouse Up ─────────────────────────────────────────────────
   _onUp(e) {
@@ -479,13 +475,11 @@ if (this.activeTool === 'polygon') {
   },
 
   // ── Aplicar alça de resize ───────────────────────────────────
-  _applyHandle(obj, handleId, pt, s)
-  {
+  _applyHandle(obj, handleId, pt, s, startPt) {
     const gs = window.VTTGrid?.size || 50;
 
     if (obj.shape === 'rect') {
       let { x, y, width: w, height: h } = s;
-
 
       // Para rect sem rotação: redimensionamento direto
       // Para rect com rotação: projeta no espaço local (simplificado para rotações pequenas)
@@ -500,27 +494,26 @@ if (this.activeTool === 'polygon') {
       Lighting.Model.updateObject(obj.id, { x, y, width: w, height: h });
 
     } else if (obj.shape === 'circle') {
-      // Alça de raio de luz
+      // Alça de raio de luz: distância horizontal do mouse ao centro inicial
       if (handleId === 'light-r') {
         const dist = Math.abs(pt.x - s.x);
         const diam = Math.max(0.5, Math.round((dist / gs) * 2 * 10) / 10);
         Lighting.Model.updateObject(obj.id, { lightDiameter: diam });
       }
-      // Alça de raio de penumbra
+      // Alça de raio de penumbra: distância horizontal do mouse ao centro inicial
       if (handleId === 'penum-r') {
         const dist = Math.abs(pt.x - s.x);
         const diam = Math.max(0.5, Math.round((dist / gs) * 2 * 10) / 10);
         Lighting.Model.updateObject(obj.id, { penumbraDiameter: diam });
       }
-      // Alça de mover (centro)
+      // Alça de mover (centro): delta relativo ao ponto de clique inicial
       if (handleId === 'center') {
-     const dx = pt.x - s.x;
-const dy = pt.y - s.y;
-
-Lighting.Model.updateObject(obj.id, {
-  x: s.x + dx,
-  y: s.y + dy
-});
+        const dx = pt.x - startPt.x;
+        const dy = pt.y - startPt.y;
+        Lighting.Model.updateObject(obj.id, {
+          x: s.x + dx,
+          y: s.y + dy
+        });
       }
     }
   },
