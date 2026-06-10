@@ -1,38 +1,36 @@
 <script>
-// lighting-model.html
+// lighting-model.html — Modelo unificado de iluminação
 console.log('lighting-model carregado');
 
 window.Lighting = window.Lighting || {};
 
 Lighting.Model = {
-  gridSize: 50,
-  objects:  [],
-  walls:    [],
-  _nextId:  1,
-  masterReveal:     false,
-  enabled:          false,
-  penumbraOpacity:  0.9,   // 0 = transparente (luz), 1 = sombra total
+  gridSize:     50,
+  objects:      [],   // [{ id, name, shape, mode, locked, visible, ... }]
+  walls:        [],   // [{ id, name, points:[{x,y}…], locked, visible }]
+  _nextId:      1,
+  masterReveal: false,
+  selectedWallId: null,   // parede selecionada (null = nenhuma)
 
+  // ── CRUD objetos (dark/light) ────────────────────────────────
   addObject(props) {
     const id  = this._nextId++;
     const obj = Object.assign({
       id,
-      name:             props.name             || 'Objeto',
-      shape:            props.shape            || 'rect',
-      mode:             props.mode             || 'dark',
-      locked:           false,
-      visible:          true,
-      x:                props.x                || 0,
-      y:                props.y                || 0,
-      width:            props.width            || 100,
-      height:           props.height           || 100,
-      rotation:         props.rotation         || 0,
-      radius:           props.radius           || 50,
-      lightDiameter:    props.lightDiameter    || 4,
-      penumbraDiameter: props.penumbraDiameter || 8,
-      points:           props.points           || [],
-      tokenId:          props.tokenId          || null,
-      _totalCover:      props._totalCover      || false,
+      name:        props.name  || 'Objeto',
+      shape:       props.shape || 'rect',   // rect | circle | polygon
+      mode:        props.mode  || 'dark',   // dark | light
+      locked:      false,
+      visible:     true,
+      lightSource: props.lightSource || false,
+      x:           props.x      || 0,
+      y:           props.y      || 0,
+      width:       props.width  || 100,
+      height:      props.height || 100,
+      radius:      props.radius || 50,
+      luminosity:  props.luminosity  || 6,
+      penumbra:    props.penumbra    || 12,
+      points:      props.points      || [],
     }, props);
     this.objects.push(obj);
     return obj;
@@ -45,135 +43,182 @@ Lighting.Model = {
     return this.objects[idx];
   },
 
-  removeObject(id) { this.objects = this.objects.filter(o => o.id !== id); },
-  getObject(id)    { return this.objects.find(o => o.id === id); },
-
-  addWall(p1, p2, opts = {}) {
-    const id   = this._nextId++;
-    const wall = Object.assign({ id, p1: { ...p1 }, p2: { ...p2 }, locked: false, visible: true }, opts);
-    this.walls.push(wall);
-    return wall;
+  removeObject(id) {
+    this.objects = this.objects.filter(o => o.id !== id);
   },
 
-  removeWall(id) { this.walls = this.walls.filter(w => w.id !== id); },
-  getWall(id)    { return this.walls.find(w => w.id === id); },
+  getObject(id) {
+    return this.objects.find(o => o.id === id) || null;
+  },
 
   toggleObjectMode(id) {
-    const o = this.getObject(id);
-    if (!o) return null;
-    return this.updateObject(id, { mode: o.mode === 'dark' ? 'light' : 'dark' });
+    const obj = this.getObject(id);
+    if (!obj) return null;
+    return this.updateObject(id, { mode: obj.mode === 'dark' ? 'light' : 'dark' });
   },
 
   toggleObjectLocked(id) {
-    const o = this.getObject(id);
-    if (!o) return null;
-    return this.updateObject(id, { locked: !o.locked });
+    const obj = this.getObject(id);
+    if (!obj) return null;
+    return this.updateObject(id, { locked: !obj.locked });
   },
 
   duplicateObject(id) {
     const orig = this.getObject(id);
     if (!orig) return null;
-    const copy     = Object.assign({}, orig);
-    copy.id        = this._nextId++;
-    copy.name      = 'Cópia de ' + orig.name;
-    copy.x        += (this.gridSize || 50) * 0.5;
-    copy.y        += (this.gridSize || 50) * 0.5;
-    copy._totalCover = false;
+    const copy    = Object.assign({}, orig);
+    copy.id       = this._nextId++;
+    copy.name     = 'Cópia de ' + orig.name;
+    copy.x       += this.gridSize * 0.5;
+    copy.y       += this.gridSize * 0.5;
     if (copy.points) copy.points = copy.points.map(p => ({ x: p.x, y: p.y }));
     this.objects.push(copy);
     return copy;
   },
 
-  hasTotalCover() {
-    return this.objects.some(o => o._totalCover === true);
+  // ── CRUD paredes ─────────────────────────────────────────────
+  // points: [{x,y}, {x,y}, …]  — mínimo 2, sem limite máximo
+
+  addWall(points, name) {
+    if (!points || points.length < 2) return null;
+    const id   = this._nextId++;
+    const wall = {
+      id,
+      name:    name || ('Parede ' + id),
+      points:  points.map(p => ({ x: p.x, y: p.y })),
+      locked:  false,
+      visible: true,
+    };
+    this.walls.push(wall);
+    return wall;
   },
 
-  toggleTotalCover() {
-    const ex = this.objects.find(o => o._totalCover === true);
-    if (ex) { this.removeObject(ex.id); return false; }
-    this.addObject({
-      name: 'Cobertura total', shape: 'rect', mode: 'dark',
-      x: 0, y: 0, width: 99999, height: 99999,
-      locked: true, _totalCover: true,
-    });
-    return true;
+  updateWall(id, updates) {
+    const idx = this.walls.findIndex(w => w.id === id);
+    if (idx === -1) return null;
+    this.walls[idx] = Object.assign({}, this.walls[idx], updates);
+    return this.walls[idx];
   },
 
-// Converte um objeto de área em segmentos de parede
-convertToWalls(id) {
-  const obj = this.getObject(id);
-  if (!obj) return;
+  removeWall(id) {
+    this.walls = this.walls.filter(w => w.id !== id);
+    if (this.selectedWallId === id) this.selectedWallId = null;
+  },
 
-  const segments = [];
+  getWall(id) {
+    return this.walls.find(w => w.id === id) || null;
+  },
 
-  if (obj.shape === 'rect') {
-    const { x, y } = obj;
-    const w = obj.width  || 100;
-    const h = obj.height || 100;
-    const rot = (obj.rotation || 0) * Math.PI / 180;
-    const cx  = x + w/2, cy = y + h/2;
-    const corners = [
-      { x, y }, { x: x+w, y }, { x: x+w, y: y+h }, { x, y: y+h }
-    ].map(p => {
-      const dx = p.x - cx, dy = p.y - cy;
-      return {
-        x: cx + dx * Math.cos(rot) - dy * Math.sin(rot),
-        y: cy + dx * Math.sin(rot) + dy * Math.cos(rot),
-      };
-    });
-    for (let i = 0; i < 4; i++) {
-      segments.push([corners[i], corners[(i+1) % 4]]);
+  duplicateWall(id) {
+    const orig = this.getWall(id);
+    if (!orig) return null;
+    const gs   = this.gridSize || 50;
+    const copy = {
+      id:      this._nextId++,
+      name:    'Cópia de ' + orig.name,
+      points:  orig.points.map(p => ({ x: p.x + gs * 0.5, y: p.y + gs * 0.5 })),
+      locked:  false,
+      visible: true,
+    };
+    this.walls.push(copy);
+    return copy;
+  },
+
+  // Insere novo vértice entre os índices i e i+1
+  insertWallVertex(wallId, afterIndex) {
+    const wall = this.getWall(wallId);
+    if (!wall) return;
+    const a   = wall.points[afterIndex];
+    const b   = wall.points[afterIndex + 1];
+    if (!a || !b) return;
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const pts = wall.points.slice();
+    pts.splice(afterIndex + 1, 0, mid);
+    this.updateWall(wallId, { points: pts });
+  },
+
+  // Remove vértice pelo índice (garante mínimo de 2 pontos)
+  removeWallVertex(wallId, index) {
+    const wall = this.getWall(wallId);
+    if (!wall || wall.points.length <= 2) return;
+    const pts = wall.points.filter((_, i) => i !== index);
+    this.updateWall(wallId, { points: pts });
+  },
+
+  // Seleção
+  selectWall(id) {
+    this.selectedWallId = id;
+  },
+
+  clearWallSelection() {
+    this.selectedWallId = null;
+  },
+
+  // Retorna segmentos [{x1,y1,x2,y2}] de todas as paredes visíveis
+  // (interface futura para raycasting)
+  getWallSegments() {
+    const segs = [];
+    for (const wall of this.walls) {
+      if (!wall.visible) continue;
+      for (let i = 0; i < wall.points.length - 1; i++) {
+        segs.push({
+          x1: wall.points[i].x,
+          y1: wall.points[i].y,
+          x2: wall.points[i + 1].x,
+          y2: wall.points[i + 1].y,
+          wallId: wall.id,
+        });
+      }
     }
+    return segs;
+  },
 
-  } else if (obj.shape === 'circle') {
-    const gs = window.VTTGrid?.size || this.gridSize || 50;
-    const r  = ((obj.penumbraDiameter || obj.lightDiameter || 4) / 2) * gs;
-    const N  = 16; // 16 segmentos para aproximar o círculo
-    for (let i = 0; i < N; i++) {
-      const a1 = (i / N) * Math.PI * 2;
-      const a2 = ((i+1) / N) * Math.PI * 2;
-      segments.push([
-        { x: obj.x + Math.cos(a1) * r, y: obj.y + Math.sin(a1) * r },
-        { x: obj.x + Math.cos(a2) * r, y: obj.y + Math.sin(a2) * r },
-      ]);
-    }
-
-  } else if (obj.shape === 'polygon' && obj.points && obj.points.length >= 3) {
-    const pts = obj.points;
-    for (let i = 0; i < pts.length; i++) {
-      segments.push([pts[i], pts[(i+1) % pts.length]]);
-    }
-  }
-
-  segments.forEach(([p1, p2]) => this.addWall(p1, p2));
-  this.removeObject(id);
-},
-
+  // ── Persistência ─────────────────────────────────────────────
   _save() {
     try {
-      localStorage.setItem('lighting_state_v3', JSON.stringify({
-        objects:         this.objects,
-        walls:           this.walls,
-        masterReveal:    this.masterReveal,
-        enabled:         this.enabled,
-        penumbraOpacity: this.penumbraOpacity,
-        _nextId:         this._nextId,
-      }));
-    } catch(e) { console.warn('Lighting save failed', e); }
+      const payload = JSON.stringify({
+        objects:      this.objects,
+        walls:        this.walls,
+        masterReveal: this.masterReveal,
+        _nextId:      this._nextId,
+      });
+      localStorage.setItem('lighting_state_v3', payload);
+      try {
+        if (window.google?.script?.run?.saveLightingState) {
+          google.script.run.withFailureHandler(() => {}).saveLightingState(payload);
+        }
+      } catch (e) {}
+    } catch (e) {
+      console.warn('Lighting save failed', e);
+    }
   },
 
   _load() {
     try {
       const raw = localStorage.getItem('lighting_state_v3');
       if (!raw) return;
-      const s              = JSON.parse(raw);
-      this.objects         = s.objects         || [];
-      this.walls           = s.walls           || [];
-      this.masterReveal    = s.masterReveal     || false;
-      this.enabled         = s.enabled         || false;
-      this.penumbraOpacity = s.penumbraOpacity !== undefined ? s.penumbraOpacity : 0.9;
-      this._nextId         = s._nextId         || (this.objects.length + this.walls.length + 1);
-    } catch(e) { console.warn('Lighting load failed', e); }
+      const s           = JSON.parse(raw);
+      this.objects      = s.objects      || [];
+      this.masterReveal = s.masterReveal || false;
+      this._nextId      = s._nextId      || 1;
+
+      // Migração: paredes antigas {p1,p2} → {points:[p1,p2]}
+      this.walls = (s.walls || []).map(w => {
+        if (w.points) return w;                       // já novo formato
+        return {
+          id:      w.id,
+          name:    w.name || ('Parede ' + w.id),
+          points:  [
+            { x: w.p1.x, y: w.p1.y },
+            { x: w.p2.x, y: w.p2.y },
+          ],
+          locked:  w.locked  || false,
+          visible: w.visible !== false,
+        };
+      });
+    } catch (e) {
+      console.warn('Lighting load failed', e);
+    }
   },
 };
 
