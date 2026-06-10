@@ -20,23 +20,60 @@ Lighting.UI = {
       this.sidebar = sidebar;
       this._createPanel();
 
-      if (window.VTTMode && typeof VTTMode.set === 'function') VTTMode.set('lighting');
-      Lighting.Input.init();
-      Lighting.Render.init();
-      this.refresh();
+  Lighting.Input.init();
+Lighting.Render.init();
+this.refresh();
+
+this._startModeObserver();
     }, 500);
   },
 
   // ── Painel principal ─────────────────────────────────────────
   _createPanel() {
-    const cat   = document.createElement('div');
-    cat.className = 'category';
-    cat.id        = 'lighting-panel';
+  const cat = document.createElement('div');
+cat.className = 'category';
+cat.id = 'cat-lighting';
 
     const title     = document.createElement('div');
     title.className = 'category-title';
     title.innerText = 'Iluminação';
     cat.appendChild(title);
+
+// ===== BOTÃO DE MODO =====
+
+const modeBtn = document.createElement('button');
+
+modeBtn.id = 'lighting-mode-btn';
+modeBtn.className = 'mode-btn mode-lighting';
+modeBtn.textContent = '💡 ATIVAR ILUMINAÇÃO';
+
+modeBtn.onclick = () => {
+  if (window.VTTMode?.setMode) {
+    VTTMode.setMode('lighting');
+  }
+};
+
+modeBtn.onclick = () => {
+  console.log('[Lighting] botão clicado');
+
+  if (window.VTTMode?.setMode) {
+    VTTMode.setMode('lighting');
+  }
+};
+
+cat.appendChild(modeBtn);
+
+// registra no VTTMode
+if (window.VTTMode) {
+  VTTMode._modeBtns = VTTMode._modeBtns || {};
+  VTTMode._categoryIds = VTTMode._categoryIds || {};
+
+  VTTMode._modeBtns.lighting = modeBtn;
+  VTTMode._categoryIds.lighting = 'cat-lighting';
+  console.log('[Lighting] registrado no VTTMode');
+console.log(VTTMode._modeBtns);
+console.log(VTTMode._categoryIds);
+}
 
     // Ferramentas
     cat.appendChild(this._buildToolsSection());
@@ -55,7 +92,14 @@ Lighting.UI = {
     // Painel de propriedades de objeto
     cat.appendChild(this._buildPropsSection());
 
-    this.sidebar.appendChild(cat);
+  this.sidebar.appendChild(cat);
+
+  if (typeof initCollapseForCategory === 'function') {
+  initCollapseForCategory(cat);
+}
+
+// painel sempre visível
+cat.style.display = 'block';
   },
 
   _buildToolsSection() {
@@ -554,6 +598,28 @@ Lighting.UI = {
     row.appendChild(val);
     parent.appendChild(row);
   },
+
+_startModeObserver() {
+  if (this._modeObserver) return;
+
+  this._modeObserver = setInterval(() => {
+
+    if (!window.VTTMode) return;
+
+    const active = VTTMode.is('lighting');
+
+    const canvas = document.getElementById(
+      'lighting-interaction-canvas'
+    );
+
+    if (canvas) {
+      canvas.style.pointerEvents =
+        active ? 'auto' : 'none';
+    }
+
+  }, 100);
+
+},
 
   _rename(type, item) {
     const newName = prompt('Novo nome:', item.name);
