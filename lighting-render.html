@@ -46,6 +46,10 @@ Lighting.Render = {
   // Mantido por compatibilidade — não mais necessário com points[]
   buildSpatialIndex() {},
 
+  _shouldShowWalls() {
+  return !!Lighting.Model.masterReveal;
+},
+
   // ── Pipeline principal ───────────────────────────────────────
   draw() {
     if (!this._canvas) { this.init(); return; }
@@ -58,19 +62,26 @@ Lighting.Render = {
 
     // Sem fog: só mostra paredes e UI
     if (!Lighting.Model.fogEnabled) {
-      this._drawWalls(ctx);
-      this._drawUI(ctx);
-      return;
-    }
+  if (this._shouldShowWalls()) {
+    this._drawWalls(ctx);
+  }
+
+  this._drawUI(ctx);
+  return;
+}
 
     // Master reveal: overlay leve + paredes
-    if (Lighting.Model.masterReveal) {
-      ctx.fillStyle = 'rgba(0,0,0,0.15)';
-      ctx.fillRect(0, 0, W, H);
-      this._drawWalls(ctx);
-      this._drawUI(ctx);
-      return;
-    }
+  if (Lighting.Model.masterReveal) {
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.fillRect(0, 0, W, H);
+
+  if (this._shouldShowWalls()) {
+    this._drawWalls(ctx);
+  }
+
+  this._drawUI(ctx);
+  return;
+}
 
     const darkObjs  = Lighting.Model.objects.filter(o => o.visible && o.mode === 'dark');
     const lightObjs = Lighting.Model.objects.filter(o => o.visible && o.mode === 'light');
@@ -141,12 +152,15 @@ const penumR =
     });
 
     // Passo 3 — copia máscara para o canvas visível
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.drawImage(this._off, 0, 0);
+   ctx.globalCompositeOperation = 'source-over';
+ctx.drawImage(this._off, 0, 0);
 
-    // Passo 4 — paredes e UI por cima
-    this._drawWalls(ctx);
-    this._drawUI(ctx);
+// Passo 4 — paredes e UI por cima
+if (this._shouldShowWalls()) {
+  this._drawWalls(ctx);
+}
+
+this._drawUI(ctx);
   },
 
   // ── Preenche forma escura ────────────────────────────────────
