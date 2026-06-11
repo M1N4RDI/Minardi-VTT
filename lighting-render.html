@@ -112,6 +112,11 @@ Lighting.Render = {
     // Passo 2 — recorta luz (destination-out)
     const gs = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
 
+    const hasRaycast =
+  !!window.Lighting?.Raycast &&
+  !!Lighting.Model.walls &&
+  Lighting.Model.walls.length > 0;
+
     lightObjs.forEach(obj => {
       offCtx.save();
       offCtx.globalCompositeOperation = 'destination-out';
@@ -124,6 +129,37 @@ Lighting.Render = {
 const penumR =
   ((obj.penumbraDiameter || 12) / 2) * gs;
         const cx = obj.x, cy = obj.y;
+
+        // =====================================
+// RAYCAST CLIP
+// =====================================
+if (hasRaycast) {
+  try {
+    const poly = Lighting.Raycast.getVisibilityPolygon(
+      cx,
+      cy,
+      Lighting.Model.walls,
+      penumR
+    );
+
+    if (poly && poly.length >= 3) {
+      offCtx.beginPath();
+      offCtx.moveTo(poly[0].x, poly[0].y);
+
+      for (let i = 1; i < poly.length; i++) {
+        offCtx.lineTo(poly[i].x, poly[i].y);
+      }
+
+      offCtx.closePath();
+      offCtx.clip();
+    }
+  } catch (err) {
+    console.warn(
+      '[Lighting.Render] raycasting falhou:',
+      err
+    );
+  }
+}
 
         // Penumbra: gradiente do raio de luz até o raio de penumbra
         if (penumR > lightR) {
