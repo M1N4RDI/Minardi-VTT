@@ -17,7 +17,7 @@ Lighting.Control = {
     const t = TokenPlugin.Model.all().find((tt) => tt.id === tokenId);
     if (!t) return null;
 
-    const gs = Lighting.Model.gridSize || 50;
+    const gs = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
     const x = t.gx * gs + (t.cells * gs) / 2;
     const y = t.gy * gs + (t.cells * gs) / 2;
 
@@ -48,7 +48,7 @@ Lighting.Control = {
       tokens.forEach((t) => {
         const l = Lighting.Model.objects.find((ll) => ll.tokenId === t.id);
         if (l) {
-          const gs = Lighting.Model.gridSize || 50;
+          const gs = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
           const nx = t.gx * gs + (t.cells * gs) / 2;
           const ny = t.gy * gs + (t.cells * gs) / 2;
           if (l.x !== nx || l.y !== ny) {
