@@ -17,16 +17,15 @@
   <?!= include('audio-ui'); ?>
   <?!= include('audio-main'); ?>
   <?!= include('lighting-model'); ?>
+  <?!= include('lighting-raycast'); ?>
   <?!= include('lighting-render'); ?>
   <?!= include('lighting-input'); ?>
   <?!= include('lighting-control'); ?>
   <?!= include('lighting-ui'); ?>
 </head>
 <body oncontextmenu="return false;">
-  <button class="toggle-btn sidebar-right" onclick="toggleSidebar()">⚙️</button>
-
+  <button class="toggle-btn" onclick="toggleSidebar()">⚙️</button>
   <div id="sidebar" class="right">
-
     <div style="min-width: 100%;">
       <h1 style="margin: 0 0 10px 0; color:var(--accent-color); font-size: 1.4em;">Minardi VTT</h1>
       <div style="display: flex; gap: 5px; margin-bottom: 15px;">
@@ -34,9 +33,7 @@
         <button class="btn-full btn-save" onclick="saveSession()">SALVAR</button>
       </div>
     </div>
-
-    <!-- APARÊNCIA E MENU -->
-    <div class="category" id="cat-appearance">
+    <div class="category">
       <div class="category-title">Aparência e Menu</div>
       <div class="control-group">
         <label>Tema:</label>
@@ -56,9 +53,7 @@
         </select>
       </div>
     </div>
-
-    <!-- ARQUIVOS -->
-    <div class="category" id="cat-files">
+    <div class="category">
       <div class="category-title">Arquivos</div>
       <div class="control-group">
         <label>ID Pasta Drive:</label>
@@ -70,11 +65,8 @@
         <button class="btn-full" id="play-pause-btn" onclick="toggleVideoPlayback()">⏸ PAUSAR</button>
       </div>
     </div>
-
-    <!-- FERRAMENTAS DE GRID  (id: cat-grid — registrado no VTTMode) -->
-    <div class="category" id="cat-grid">
+    <div class="category">
       <div class="category-title">Ferramentas de Grid</div>
-      <!-- botão de modo injetado dinamicamente por javascript.html -->
       <div class="control-group">
         <label>Ferramenta:</label>
         <select id="tool-mode" onchange="toggleToolParams()">
@@ -99,9 +91,7 @@
       </div>
       <input type="range" id="grid-opacity" min="0" max="1" step="0.05" value="0.4" oninput="drawGrid()">
     </div>
-
-    <!-- MONITOR -->
-    <div class="category" id="cat-monitor">
+    <div class="category">
       <div class="category-title">Monitor</div>
       <div class="control-group">
         <label>Enquadramento:</label>
@@ -131,16 +121,10 @@
           onclick="applyMapScale(0)">↺ Resetar Escala</button>
       </div>
     </div>
-
-    <!-- Áudio, Tokens e Iluminação são injetados dinamicamente pelos módulos -->
-
-  </div><!-- /sidebar -->
+  </div>
 
   <div id="main-wrapper">
-    <div id="map-container"
-         onmousedown="startMeasure(event)"
-         onmousemove="updateMeasure(event)"
-         onmouseup="stopMeasure()">
+    <div id="map-container" onmousedown="startMeasure(event)" onmousemove="updateMeasure(event)" onmouseup="stopMeasure()">
       <img id="map-image" src="" style="display: none;">
       <video id="map-video" autoplay loop muted playsinline style="display: none;"></video>
       <canvas id="grid-canvas"></canvas>

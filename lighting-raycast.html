@@ -1,0 +1,213 @@
+<script>
+// lighting-raycast.html — Módulo de visibilidade por raycasting
+// Calcula o polígono de visibilidade a partir de uma origem, respeitando paredes.
+// NÃO altera lógica de iluminação existente — funciona apenas como gerador de máscara.
+
+console.log('lighting-raycast carregado');
+
+window.Lighting = window.Lighting || {};
+
+Lighting.Raycast = {
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // API pública
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Calcula o polígono de visibilidade a partir de (originX, originY)
+   * levando em conta os segmentos de parede fornecidos.
+   *
+   * @param {number} originX  - X da fonte de luz em pixels
+   * @param {number} originY  - Y da fonte de luz em pixels
+   * @param {Array}  walls    - Array de objetos { p1:{x,y}, p2:{x,y} }
+   *                            (formato de Lighting.Model.walls)
+   * @param {number} [maxRadius] - Raio máximo do raio (para bounding box).
+   *                               Se omitido, usa dimensões do canvas.
+   * @returns {Array<{x:number, y:number}>} Vértices do polígono, em ordem angular.
+   */
+  getVisibilityPolygon(originX, originY, walls, maxRadius) {
+    const segments = this._getWallSegments(walls);
+
+    // Bounding box ao redor da origem para conter o raycasting
+    const r = maxRadius || 4000;
+    const boundingBox = [
+      { x1: originX - r, y1: originY - r, x2: originX + r, y2: originY - r },
+      { x1: originX + r, y1: originY - r, x2: originX + r, y2: originY + r },
+      { x1: originX + r, y1: originY + r, x2: originX - r, y2: originY + r },
+      { x1: originX - r, y1: originY + r, x2: originX - r, y2: originY - r },
+    ];
+    const allSegments = boundingBox.concat(segments);
+
+    // Coletar todos os vértices únicos dos segmentos de parede
+    // (bounding box não precisa de vértices extras, só os das paredes reais)
+    const vertices = [];
+    for (let i = 0; i < segments.length; i++) {
+      const s = segments[i];
+      vertices.push({ x: s.x1, y: s.y1 });
+      vertices.push({ x: s.x2, y: s.y2 });
+    }
+    // Adicionar os 4 cantos do bounding box
+    vertices.push({ x: originX - r, y: originY - r });
+    vertices.push({ x: originX + r, y: originY - r });
+    vertices.push({ x: originX + r, y: originY + r });
+    vertices.push({ x: originX - r, y: originY + r });
+
+    // Para cada vértice, lançar 3 raios (angle-ε, angle, angle+ε)
+    const EPS = 0.0001;
+    const angles = [];
+    for (let i = 0; i < vertices.length; i++) {
+      const v = vertices[i];
+      const angle = Math.atan2(v.y - originY, v.x - originX);
+      angles.push(angle - EPS);
+      angles.push(angle);
+      angles.push(angle + EPS);
+    }
+
+    // Lançar cada raio e registrar o ponto de hit mais próximo
+    const hits = [];
+    for (let i = 0; i < angles.length; i++) {
+      const hit = this._castRay(originX, originY, angles[i], allSegments);
+      if (hit) {
+        hits.push({ x: hit.x, y: hit.y, angle: angles[i] });
+      }
+    }
+
+    // Ordenar por ângulo
+    hits.sort((a, b) => a.angle - b.angle);
+
+    // Remover duplicatas muito próximas
+    const poly = [];
+    for (let i = 0; i < hits.length; i++) {
+      const h = hits[i];
+      if (i === 0 || Math.abs(h.angle - hits[i - 1].angle) > 1e-9) {
+        poly.push({ x: h.x, y: h.y });
+      }
+    }
+
+    return poly;
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Funções internas
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Converte o array Lighting.Model.walls em segmentos planos {x1,y1,x2,y2}.
+   * Trata cada par consecutivo de pontos como um segmento independente.
+   *
+   * @param {Array} walls
+   * @returns {Array<{x1,y1,x2,y2}>}
+   */
+  _getWallSegments(walls) {
+    const segs = [];
+    if (!walls || walls.length === 0) return segs;
+
+    for (let i = 0; i < walls.length; i++) {
+      const w = walls[i];
+      if (!w.visible) continue;
+
+      // Suporte ao formato atual: { p1:{x,y}, p2:{x,y} }
+      if (w.p1 && w.p2) {
+        segs.push({ x1: w.p1.x, y1: w.p1.y, x2: w.p2.x, y2: w.p2.y });
+        continue;
+      }
+
+      // Suporte a formato alternativo: { points:[{x,y}, ...] }
+      if (w.points && w.points.length >= 2) {
+        for (let j = 0; j < w.points.length - 1; j++) {
+          segs.push({
+            x1: w.points[j].x,
+            y1: w.points[j].y,
+            x2: w.points[j + 1].x,
+            y2: w.points[j + 1].y,
+          });
+        }
+      }
+    }
+    return segs;
+  },
+
+  /**
+   * Lança um raio a partir de (ox, oy) na direção `angle` (radianos)
+   * e retorna o ponto de interseção mais próximo com qualquer segmento.
+   *
+   * @param {number} ox       - Origem X
+   * @param {number} oy       - Origem Y
+   * @param {number} angle    - Direção em radianos
+   * @param {Array}  segments - Array de {x1,y1,x2,y2}
+   * @returns {{x,y,dist}|null}
+   */
+  _castRay(ox, oy, angle, segments) {
+    // Direção do raio
+    const dx = Math.cos(angle);
+    const dy = Math.sin(angle);
+
+    let closest = null;
+    let minDist = Infinity;
+
+    for (let i = 0; i < segments.length; i++) {
+      const hit = this._raySegmentIntersection(ox, oy, dx, dy, segments[i]);
+      if (hit !== null && hit < minDist) {
+        minDist = hit;
+        closest = hit;
+      }
+    }
+
+    if (closest === null) return null;
+    return {
+      x: ox + dx * closest,
+      y: oy + dy * closest,
+      dist: closest,
+    };
+  },
+
+  /**
+   * Calcula a interseção entre um raio infinito e um segmento finito.
+   * Raio: P = (ox,oy) + t*(dx,dy),  t >= 0
+   * Segmento: Q = (x1,y1) + u*((x2-x1),(y2-y1)),  0 <= u <= 1
+   *
+   * Retorna t (distância ao longo do raio) se houver interseção, ou null.
+   *
+   * @returns {number|null}
+   */
+  _raySegmentIntersection(ox, oy, dx, dy, seg) {
+    const ex = seg.x2 - seg.x1;
+    const ey = seg.y2 - seg.y1;
+
+    const denom = dx * ey - dy * ex;
+    if (Math.abs(denom) < 1e-10) return null; // paralelo
+
+    const fx = seg.x1 - ox;
+    const fy = seg.y1 - oy;
+
+    const t = (fx * ey - fy * ex) / denom;
+    const u = (fx * dy - fy * dx) / denom;
+
+    if (t < 0) return null;         // interseção atrás da origem
+    if (u < 0 || u > 1) return null; // fora do segmento
+
+    return t;
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Utilitário: aplicar clipping de visibilidade no ctx antes de desenhar a luz
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Constrói o path de clipping no ctx a partir do polígono de visibilidade.
+   * Deve ser chamado com ctx.save() antes e ctx.clip() depois.
+   *
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {Array<{x,y}>} poly
+   */
+  buildClipPath(ctx, poly) {
+    if (!poly || poly.length < 3) return;
+    ctx.beginPath();
+    ctx.moveTo(poly[0].x, poly[0].y);
+    for (let i = 1; i < poly.length; i++) {
+      ctx.lineTo(poly[i].x, poly[i].y);
+    }
+    ctx.closePath();
+  },
+};
+</script>
