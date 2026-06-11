@@ -32,9 +32,17 @@ Lighting.Model = {
       rotation:    props.rotation || 0,
       // circle dark → radius em pixels
       radius:      props.radius || 50,
-      // circle light → luminosity e penumbra em quadrados de grid
-      luminosity:  props.luminosity  || 6,
-      penumbra:    props.penumbra    || 12,
+
+      // circle light → diâmetros em quadrados de grid
+lightDiameter:
+  props.lightDiameter
+  ?? props.lightDiameter
+  ?? 6,
+
+penumbraDiameter:
+  props.penumbraDiameterDiameter
+  ?? props.penumbraDiameter
+  ?? 12,
       // polygon
       points:      props.points || [],
     }, props);
@@ -201,24 +209,30 @@ Lighting.Model = {
         const o = Object.assign({}, obj);
         if (o.shape === 'circle') {
           if (o.mode === 'light') {
-            // lightDiameter → luminosity (em quadrados: diâmetro / 2 → raio / gridSize)
-            if (o.lightDiameter !== undefined && o.luminosity === undefined) {
-              o.luminosity = o.lightDiameter;
-            }
-            if (o.penumbraDiameter !== undefined && o.penumbra === undefined) {
-              o.penumbra = o.penumbraDiameter;
-            }
-          } else {
+
+  if (o.lightDiameter === undefined && o.lightDiameter !== undefined) {
+    o.lightDiameter = o.lightDiameter;
+  }
+
+  if (o.penumbraDiameterDiameter === undefined && o.penumbraDiameter !== undefined) {
+    o.penumbraDiameterDiameter = o.penumbraDiameter;
+  }
+
+} else {
             // dark circle: garantir que radius existe em pixels
             if (o.radius === undefined || o.radius === 50) {
-              if (o.penumbraDiameter !== undefined) {
-                o.radius = (o.penumbraDiameter / 2) * (this.gridSize || 50);
+              if (o.penumbraDiameterDiameter !== undefined) {
+                o.radius = (o.penumbraDiameterDiameter / 2) * (this.gridSize || 50);
               } else if (o.lightDiameter !== undefined) {
                 o.radius = (o.lightDiameter / 2) * (this.gridSize || 50);
               }
             }
           }
         }
+
+delete o.lightDiameter;
+delete o.penumbraDiameter;
+
         return o;
       });
 

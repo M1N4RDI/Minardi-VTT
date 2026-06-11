@@ -479,18 +479,39 @@ revealBtn.style.opacity =
     propsEl.appendChild(lockRow);
 
     // Propriedades de luz
-    if (obj.mode === 'light') {
-      this._propField(propsEl, 'Luminosidade (grid)', obj.luminosity || 6, val => {
-        Lighting.Model.updateObject(obj.id, { luminosity: Number(val) || 1 });
-        Lighting.Model._save();
-        Lighting.Render.draw();
-      }, 'number');
-      this._propField(propsEl, 'Penumbra (grid)', obj.penumbra || 12, val => {
-        Lighting.Model.updateObject(obj.id, { penumbra: Number(val) || 0 });
-        Lighting.Model._save();
-        Lighting.Render.draw();
-      }, 'number');
-    }
+if (obj.mode === 'light') {
+
+  this._propField(
+    propsEl,
+    'Diâmetro da Luz (grid)',
+    obj.lightDiameter || 6,
+    val => {
+      Lighting.Model.updateObject(obj.id, {
+        lightDiameter: Number(val) || 1
+      });
+
+      Lighting.Model._save();
+      Lighting.Render.draw();
+    },
+    'number'
+  );
+
+  this._propField(
+    propsEl,
+    'Diâmetro da Penumbra (grid)',
+    obj.penumbraDiameterDiameter || 12,
+    val => {
+      Lighting.Model.updateObject(obj.id, {
+        penumbraDiameter: Number(val) || 0
+      });
+
+      Lighting.Model._save();
+      Lighting.Render.draw();
+    },
+    'number'
+  );
+
+}
 
     // Botões de ação
     const btnRow = document.createElement('div');
