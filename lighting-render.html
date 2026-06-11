@@ -122,7 +122,7 @@ Lighting.Render = {
   ((obj.lightDiameter || 6) / 2) * gs;
 
 const penumR =
-  ((obj.penumbraDiameterDiameter || 12) / 2) * gs;
+  ((obj.penumbraDiameter || 12) / 2) * gs;
         const cx = obj.x, cy = obj.y;
 
         // Penumbra: gradiente do raio de luz até o raio de penumbra
@@ -441,7 +441,7 @@ ctx.stroke();
       // Para círculos de luz: handle e preview de penumbra
       if (obj.mode === 'light') {
         const penumR =
-  ((obj.penumbraDiameterDiameter || 12) / 2) * gs;
+  ((obj.penumbraDiameter || 12) / 2) * gs;
         ctx.fillStyle = 'rgba(255,120,50,0.8)';
         ctx.beginPath(); ctx.arc(obj.x + penumR, obj.y, hs/2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
         ctx.strokeStyle = 'rgba(255,150,50,0.3)';
@@ -625,7 +625,7 @@ ctx.stroke();
         ((obj.lightDiameter || 6) / 2) * gs;
 
       const penumR =
-        ((obj.penumbraDiameterDiameter || 12) / 2) * gs;
+        ((obj.penumbraDiameter || 12) / 2) * gs;
 
       return [
         {

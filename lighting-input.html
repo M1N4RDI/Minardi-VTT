@@ -133,7 +133,7 @@ Lighting.Input = {
       const obj = Lighting.Model.objects[i];
       if (!obj.visible || obj._totalCover) continue;
       if (obj.shape === 'circle') {
-        const penumR = ((obj.penumbraDiameterDiameter || 12) / 2) * gs;
+        const penumR = ((obj.penumbraDiameter || 12) / 2) * gs;
         if (Math.hypot(pt.x - obj.x, pt.y - obj.y) <= penumR + hitR) return obj.id;
       } else if (obj.shape === 'rect') {
         let lx = pt.x, ly = pt.y;

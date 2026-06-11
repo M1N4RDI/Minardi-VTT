@@ -499,7 +499,7 @@ if (obj.mode === 'light') {
   this._propField(
     propsEl,
     'Diâmetro da Penumbra (grid)',
-    obj.penumbraDiameterDiameter || 12,
+    obj.penumbraDiameter || 12,
     val => {
       Lighting.Model.updateObject(obj.id, {
         penumbraDiameter: Number(val) || 0

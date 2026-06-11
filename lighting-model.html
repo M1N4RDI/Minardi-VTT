@@ -40,7 +40,7 @@ lightDiameter:
   ?? 6,
 
 penumbraDiameter:
-  props.penumbraDiameterDiameter
+  props.penumbraDiameter
   ?? props.penumbraDiameter
   ?? 12,
       // polygon
@@ -214,16 +214,16 @@ penumbraDiameter:
     o.lightDiameter = o.lightDiameter;
   }
 
-  if (o.penumbraDiameterDiameter === undefined && o.penumbraDiameter !== undefined) {
-    o.penumbraDiameterDiameter = o.penumbraDiameter;
-  }
+  if (o.penumbraDiameter === undefined) {
+  o.penumbraDiameter = 12;
+}
 
 } else {
             // dark circle: garantir que radius existe em pixels
             if (o.radius === undefined || o.radius === 50) {
-              if (o.penumbraDiameterDiameter !== undefined) {
-                o.radius = (o.penumbraDiameterDiameter / 2) * (this.gridSize || 50);
-              } else if (o.lightDiameter !== undefined) {
+              if (o.penumbraDiameter !== undefined) {
+  o.radius = (o.penumbraDiameter / 2) * (this.gridSize || 50);
+} else if (o.lightDiameter !== undefined) {
                 o.radius = (o.lightDiameter / 2) * (this.gridSize || 50);
               }
             }
