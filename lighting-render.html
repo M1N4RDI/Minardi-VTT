@@ -107,8 +107,11 @@ Lighting.Render = {
 
       if (obj.shape === 'circle') {
         // luminosity e penumbra estão em QUADRADOS DE GRID
-        const lightR = (obj.luminosity || 6)  * gs;
-        const penumR = (obj.penumbra   || 12) * gs;
+        const lightR =
+  ((obj.lightDiameter || 6) / 2) * gs;
+
+const penumR =
+  ((obj.penumbraDiameter || 12) / 2) * gs;
         const cx = obj.x, cy = obj.y;
 
         // Penumbra: gradiente do raio de luz até o raio de penumbra
@@ -358,7 +361,7 @@ Lighting.Render = {
     } else if (obj.shape === 'circle') {
       const r = obj.mode === 'dark'
         ? (obj.radius || 50)                  // dark: pixels
-        : (obj.luminosity || 6) * gs;         // light: quadrados → pixels
+        : ((obj.lightDiameter || 6) / 2) * gs;         // light: quadrados → pixels
       ctx.beginPath();
       ctx.arc(obj.x, obj.y, r, 0, Math.PI * 2);
       ctx.stroke();
@@ -398,7 +401,7 @@ Lighting.Render = {
       const gs = window.VTTGrid?.size || Lighting.Model.gridSize || 50;
       const r  = obj.mode === 'dark'
         ? (obj.radius || 50)
-        : (obj.luminosity || 6) * gs;
+        : ((obj.lightDiameter || 6) / 2) * gs;
       // Handle central
       ctx.beginPath(); ctx.arc(obj.x, obj.y, hs/2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       // Handle de raio
@@ -411,7 +414,8 @@ Lighting.Render = {
       ctx.setLineDash([]);
       // Para círculos de luz: handle e preview de penumbra
       if (obj.mode === 'light') {
-        const penumR = (obj.penumbra || 12) * gs;
+        const penumR =
+  ((obj.penumbraDiameter || 12) / 2) * gs;
         ctx.fillStyle = 'rgba(255,120,50,0.8)';
         ctx.beginPath(); ctx.arc(obj.x + penumR, obj.y, hs/2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
         ctx.strokeStyle = 'rgba(255,150,50,0.3)';
@@ -461,6 +465,148 @@ Lighting.Render = {
 
     ctx.restore();
   },
+
+  // ─────────────────────────────────────────────────────────────
+  // Helpers usados pelo Input
+  // ─────────────────────────────────────────────────────────────
+
+  _getCenter(obj) {
+    if (obj.shape === 'polygon' && obj.points?.length) {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+
+      obj.points.forEach(p => {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      });
+
+      return {
+        x: (minX + maxX) / 2,
+        y: (minY + maxY) / 2,
+      };
+    }
+
+    return {
+      x: obj.x + (obj.width || 100) / 2,
+      y: obj.y + (obj.height || 100) / 2,
+    };
+  },
+
+  _wallCenter(wall) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    wall.points.forEach(p => {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    });
+
+    return {
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2,
+    };
+  },
+
+    getRotateHandlePos(obj) {
+    if (!obj) return null;
+
+    const c = this._getCenter(obj);
+
+    return {
+      x: c.x,
+      y: c.y - 40,
+    };
+  },
+
+  _wallRotateHandlePos(wall) {
+    if (!wall) return null;
+
+    const c = this._wallCenter(wall);
+
+    return {
+      x: c.x,
+      y: c.y - 40,
+    };
+  },
+
+    getHandles(obj) {
+    if (!obj) return [];
+
+    if (obj.shape === 'rect') {
+      const x = obj.x;
+      const y = obj.y;
+      const w = obj.width || 100;
+      const h = obj.height || 100;
+
+      return [
+        { handleId:'tl', x:x,     y:y     },
+        { handleId:'tr', x:x+w,   y:y     },
+        { handleId:'bl', x:x,     y:y+h   },
+        { handleId:'br', x:x+w,   y:y+h   },
+
+        { handleId:'tm', x:x+w/2, y:y     },
+        { handleId:'bm', x:x+w/2, y:y+h   },
+        { handleId:'ml', x:x,     y:y+h/2 },
+        { handleId:'mr', x:x+w,   y:y+h/2 },
+      ];
+    }
+
+    if (obj.shape === 'circle') {
+      const gs = window.VTTGrid?.size || 50;
+
+      if (obj.mode === 'dark') {
+        const r = obj.radius || 50;
+
+        return [
+          {
+            handleId:'center',
+            x:obj.x,
+            y:obj.y
+          },
+          {
+            handleId:'light-r',
+            x:obj.x + r,
+            y:obj.y
+          }
+        ];
+      }
+
+      const lightR =
+        ((obj.lightDiameter || 6) / 2) * gs;
+
+      const penumR =
+        ((obj.penumbraDiameter || 12) / 2) * gs;
+
+      return [
+        {
+          handleId:'center',
+          x:obj.x,
+          y:obj.y
+        },
+        {
+          handleId:'light-r',
+          x:obj.x + lightR,
+          y:obj.y
+        },
+        {
+          handleId:'penum-r',
+          x:obj.x + penumR,
+          y:obj.y
+        }
+      ];
+    }
+
+    return [];
+  },
+
 };
 
 setTimeout(() => { Lighting.Render.init(); }, 300);
