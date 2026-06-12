@@ -235,8 +235,8 @@ function _injectGridModeButton() {
 // SALVAR / CARREGAR SESSÃO
 // =========================
 function saveSession() {
-  var data = {
-    folderId:      document.getElementById('folder-id').value,
+    var data = {
+    folderId: (window.BibliotecaPlugin ? BibliotecaPlugin.Model.rootFolderId : null) || "",
     tokenFolderId: (document.getElementById('token-folder-id') || {}).value || "",
     gridColor:     document.getElementById('grid-color').value,
     gridOpacity:   document.getElementById('grid-opacity').value,
@@ -247,7 +247,7 @@ function saveSession() {
     coneAngle:     document.getElementById('cone-angle').value,
     toolMode:      document.getElementById('tool-mode').value,
     mapScale:      document.getElementById('map-scale').value,
-  };
+  }
   localStorage.setItem('vtt_minardi_v1', JSON.stringify(data));
   alert("Minardi VTT: Configurações Salvas!");
 }
@@ -256,7 +256,12 @@ function loadSession() {
   var saved = localStorage.getItem('vtt_minardi_v1');
   if (saved) {
     var d = JSON.parse(saved);
-    document.getElementById('folder-id').value          = d.folderId    || "";
+    // Etapa 0: rootFolderId é gerenciado por BibliotecaPlugin.Model
+    if (d.folderId && window.BibliotecaPlugin) {
+      BibliotecaPlugin.Model.rootFolderId = d.folderId;
+    }
+    var rootInput = document.getElementById("biblioteca-root-id");
+    if (rootInput && d.folderId) rootInput.value = d.folderId;
     document.getElementById('grid-color').value         = d.gridColor   || "#ffffff";
     document.getElementById('grid-opacity').value       = d.gridOpacity || "0.4";
     document.getElementById('grid-cm').value            = d.gridCm      || "2.5";
@@ -425,23 +430,15 @@ function updateMapSize() {
   }, 150);
 }
 
-// =========================
-// DRIVE — MAPAS
-// =========================
+// connectDrive() mantido para compatibilidade.
+// Na Etapa 0 a lista de mapas é gerenciada por BibliotecaPlugin.UI._popularMapas().
+// Esta função agora é um no-op — o botão "Conectar" foi substituído
+// por "Sincronizar Biblioteca" no sidebar.
 function connectDrive() {
-  var id  = document.getElementById('folder-id').value,
-      lib = document.getElementById('drive-library');
-  lib.innerHTML = "Conectando...";
-  google.script.run.withSuccessHandler(function(maps) {
-    lib.innerHTML = "";
-    maps.forEach(function(m) {
-      var d = document.createElement('div');
-      d.className = 'drive-item';
-      d.innerText = (m.type === 'video' ? "🎬 " : "📜 ") + m.name;
-      d.onclick = function() { selectMap(m); };
-      lib.appendChild(d);
-    });
-  }).getMapsFromDrive(id);
+  // Encaminha para o novo fluxo unificado se disponível
+  if (window.BibliotecaPlugin && BibliotecaPlugin.UI) {
+    BibliotecaPlugin.UI.sincronizar();
+  }
 }
 
 function selectMap(map) {

@@ -1,0 +1,191 @@
+<script>
+// ============================================================
+// MINARDI VTT — BibliotecaPlugin
+// biblioteca-ui.html — UI da biblioteca raiz (Etapa 0)
+// ============================================================
+console.log("biblioteca-ui carregado");
+
+window.BibliotecaPlugin = window.BibliotecaPlugin || {};
+
+BibliotecaPlugin.UI = {
+
+  init() {
+    // Restaura rootFolderId no campo de input
+    var folderId = BibliotecaPlugin.Model.rootFolderId;
+    var input = document.getElementById("biblioteca-root-id");
+    if (input && folderId) input.value = folderId;
+
+    // Se já havia biblioteca no storage, popula os plugins imediatamente
+    if (BibliotecaPlugin.Model._assets.length > 0) {
+      this._atualizarContagem();
+      this._popularMapas();
+      this._popularTokens();
+      this._popularAudio();
+    }
+
+    // Registra callback para quando o Drive concluir um scan
+    BibliotecaPlugin.Drive.onAtualizar(function() {
+      BibliotecaPlugin.UI._atualizarContagem();
+      BibliotecaPlugin.UI._popularMapas();
+      BibliotecaPlugin.UI._popularTokens();
+      BibliotecaPlugin.UI._popularAudio();
+    });
+
+    console.log("BibliotecaPlugin.UI INIT");
+  },
+
+  // ---- Botão Sincronizar ----
+  sincronizar() {
+    var input = document.getElementById("biblioteca-root-id");
+    if (!input) return;
+
+    var id = input.value.trim();
+    if (!id) {
+      this._setStatus("⚠️ Informe o ID da pasta raiz.");
+      return;
+    }
+
+    BibliotecaPlugin.Model.rootFolderId = id;
+    BibliotecaPlugin.Model._salvarNoStorage();
+
+    this._setStatus("⏳ Escaneando...");
+
+    BibliotecaPlugin.Drive.sincronizar(
+      function(msg)    { BibliotecaPlugin.UI._setStatus("⏳ " + msg); },
+      function(assets) {
+        BibliotecaPlugin.UI._setStatus("✅ " + assets.length + " arquivos encontrados.");
+      },
+      function(erro)   { BibliotecaPlugin.UI._setStatus("❌ " + erro); }
+    );
+  },
+
+  _setStatus(msg) {
+    var el = document.getElementById("biblioteca-status");
+    if (el) el.textContent = msg;
+  },
+
+  _atualizarContagem() {
+    var el = document.getElementById("biblioteca-contagem");
+    if (!el) return;
+    var c = BibliotecaPlugin.Model.contarPorTipo();
+    var partes = [];
+    if (c.map)        partes.push("🗺 " + c.map + " mapas");
+    if (c.tokenImage) partes.push("🧙 " + c.tokenImage + " tokens");
+    if (c.audio)      partes.push("🎵 " + c.audio + " áudios");
+    if (c.save)       partes.push("💾 " + c.save + " saves");
+    if (c.image)      partes.push("🖼 " + c.image + " imagens");
+    el.textContent = partes.join("  ·  ") || "";
+  },
+
+  // ---- Popula lista de mapas no sidebar ----
+  _popularMapas() {
+    var lib = document.getElementById("drive-library");
+    if (!lib) return;
+
+    var mapas = BibliotecaPlugin.Model.getAssetsPorTipo("map");
+    // Inclui vídeos (assetType "map" já cobre videos pelo classificador)
+    lib.innerHTML = "";
+
+    if (!mapas.length) {
+      lib.innerHTML = "<div style='color:#555;font-size:0.75em;'>Nenhum mapa encontrado.</div>";
+      return;
+    }
+
+    mapas.forEach(function(asset) {
+      var d = document.createElement("div");
+      d.className = "drive-item";
+      var icone = asset.mimeType.indexOf("video/") === 0 ? "🎬 " : "🗺 ";
+      d.innerText = icone + asset.nome;
+      d.title     = asset.caminho ? asset.caminho + "/" + asset.nome : asset.nome;
+      d.onclick   = function() { carregarMapaPorId(asset); };
+      lib.appendChild(d);
+    });
+  },
+
+  // ---- Popula biblioteca de tokens no TokenPlugin ----
+  _popularTokens() {
+    if (!window.TokenPlugin || !TokenPlugin.Model) return;
+
+    var tokens = BibliotecaPlugin.Model.getAssetsPorTipo("tokenImage");
+    if (!tokens.length) return;
+
+    // TokenPlugin.Model.setImageLibrary espera [{name, dataUrl}]
+    // Nesta etapa passamos metadados com dataUrl=null.
+    // O player de tokens continua funcionando com base64 para os
+    // tokens já carregados — esta etapa apenas popula os metadados.
+    var metadados = tokens.map(function(a) {
+      return {
+        name:         a.nome,
+        dataUrl:      null,      // ainda null — base64 carregado sob demanda (Etapa 1)
+        driveFileId:  a.id,
+        caminho:      a.caminho
+      };
+    });
+
+    // Mescla com biblioteca existente sem apagar dataUrls já carregadas
+    var existente = TokenPlugin.Model.getImageLibrary() || [];
+    var mapa = {};
+    existente.forEach(function(img) { if (img.driveFileId) mapa[img.driveFileId] = img; });
+    metadados.forEach(function(m)   {
+      if (!mapa[m.driveFileId]) mapa[m.driveFileId] = m;
+      else if (!mapa[m.driveFileId].dataUrl && m.dataUrl) mapa[m.driveFileId].dataUrl = m.dataUrl;
+    });
+
+    TokenPlugin.Model.setImageLibrary(Object.values(mapa));
+  },
+
+  // ---- Notifica AudioPlugin sobre os assets de áudio ----
+  _popularAudio() {
+    if (!window.AudioPlugin || !AudioPlugin.Model) return;
+    // Apenas registra que há assets disponíveis.
+    // A construção da biblioteca estruturada (Music/Ambience/Effects)
+    // continua sendo feita por AudioPlugin.Drive.scanLibrary na Etapa 0.
+    // Na Etapa 1 o AudioPlugin migrará para ler de BibliotecaPlugin.
+    var audioAssets = BibliotecaPlugin.Model.getAssetsPorTipo("audio");
+    AudioPlugin.Model._bibliotecaAssets = audioAssets; // expõe para uso futuro
+  }
+};
+
+// ============================================================
+// Integração com javascript.html — substituição de carregarMapaPorId
+// Carrega um mapa pelo ID do Drive (chama getFileAsDataUrl no servidor)
+// O player base64 existente continua funcionando nesta etapa.
+// ============================================================
+function carregarMapaPorId(asset) {
+  var lib = document.getElementById("drive-library");
+  if (lib) lib.innerHTML = "<div style='color:#aaa;font-size:0.75em;'>Carregando " + asset.nome + "...</div>";
+
+  google.script.run
+    .withSuccessHandler(function(resultado) {
+      if (!resultado || resultado.erro) {
+        console.warn("carregarMapaPorId: erro", resultado && resultado.erro);
+        BibliotecaPlugin.UI._popularMapas(); // restaura lista
+        return;
+      }
+      // Reutiliza selectMap existente em javascript.html
+      selectMap({
+        name:    asset.nome,
+        dataUrl: resultado.dataUrl,
+        type:    asset.mimeType.indexOf("video/") === 0 ? "video" : "image"
+      });
+      BibliotecaPlugin.UI._popularMapas(); // restaura lista após seleção
+    })
+    .withFailureHandler(function(err) {
+      console.warn("carregarMapaPorId RPC falhou:", err.message);
+      BibliotecaPlugin.UI._popularMapas();
+    })
+    .getFileAsDataUrl(asset.id);
+}
+
+// ---- Boot ----
+(function _bootBiblioteca() {
+  var t = setInterval(function() {
+    if (document.getElementById("sidebar") && window.BibliotecaPlugin) {
+      clearInterval(t);
+      BibliotecaPlugin.Model.init();
+      BibliotecaPlugin.Drive.init();
+      BibliotecaPlugin.UI.init();
+    }
+  }, 100);
+})();
+</script>

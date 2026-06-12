@@ -1,0 +1,82 @@
+<script>
+// ============================================================
+// MINARDI VTT — BibliotecaPlugin
+// biblioteca-drive.html — Comunicação Drive (Etapa 0)
+// ============================================================
+// Chama scanBibliotecaRaiz no servidor.
+// Nunca recebe base64.
+// ============================================================
+console.log("biblioteca-drive carregado");
+
+window.BibliotecaPlugin = window.BibliotecaPlugin || {};
+
+BibliotecaPlugin.Drive = {
+
+  _scanning: false,
+
+  init() {
+    console.log("BibliotecaPlugin.Drive INIT");
+  },
+
+  // ---- Dispara o scan completo ----
+  // onProgresso(msg)  — callback de status opcional
+  // onConcluido(assets) — callback de sucesso
+  // onErro(msg)       — callback de erro
+  sincronizar(onProgresso, onConcluido, onErro) {
+    if (this._scanning) return;
+
+    var folderId = BibliotecaPlugin.Model.rootFolderId;
+    if (!folderId) {
+      if (onErro) onErro("Informe o ID da pasta raiz antes de sincronizar.");
+      return;
+    }
+
+    this._scanning = true;
+    BibliotecaPlugin.Model.setScanning();
+    if (onProgresso) onProgresso("Escaneando biblioteca...");
+
+    google.script.run
+      .withSuccessHandler(function(resultado) {
+        BibliotecaPlugin.Drive._scanning = false;
+
+        if (resultado.erro) {
+          BibliotecaPlugin.Model.setErro(resultado.erro);
+          if (onErro) onErro(resultado.erro);
+          return;
+        }
+
+        BibliotecaPlugin.Model.setAssets(resultado.assets || []);
+        BibliotecaPlugin.Drive._notificarPlugins();
+        if (onConcluido) onConcluido(resultado.assets || []);
+      })
+      .withFailureHandler(function(err) {
+        BibliotecaPlugin.Drive._scanning = false;
+        var msg = err.message || String(err);
+        BibliotecaPlugin.Model.setErro(msg);
+        if (onErro) onErro(msg);
+      })
+      .scanBibliotecaRaiz(folderId, null, "");
+  },
+
+  // ---- Notifica plugins que a biblioteca foi atualizada ----
+  // Cada plugin se registra via BibliotecaPlugin.Drive.onAtualizar(callback)
+  _callbacks: [],
+
+  onAtualizar(callback) {
+    if (typeof callback === "function") {
+      this._callbacks.push(callback);
+    }
+  },
+
+  _notificarPlugins() {
+    var assets = BibliotecaPlugin.Model.getTodos();
+    for (var i = 0; i < this._callbacks.length; i++) {
+      try {
+        this._callbacks[i](assets);
+      } catch(e) {
+        console.warn("BibliotecaPlugin.Drive: erro em callback de atualização", e);
+      }
+    }
+  }
+};
+</script>

@@ -5,6 +5,9 @@
   <meta charset="UTF-8">
   <title>Minardi VTT</title>
   <?!= include('style'); ?>
+  <?!= include('biblioteca-model'); ?>
+<?!= include('biblioteca-drive'); ?>
+<?!= include('biblioteca-ui'); ?>
   <?!= include('token-main'); ?>
   <?!= include('token-model'); ?>
   <?!= include('token-canvas'); ?>
@@ -53,18 +56,23 @@
         </select>
       </div>
     </div>
-    <div class="category">
-      <div class="category-title">Arquivos</div>
-      <div class="control-group">
-        <label>ID Pasta Drive:</label>
-        <input type="text" id="folder-id">
-        <button class="btn-full" style="background:#444" onclick="connectDrive()">Conectar</button>
-        <div id="drive-library" class="drive-list"></div>
-      </div>
-      <div id="video-controls" style="display:none;">
-        <button class="btn-full" id="play-pause-btn" onclick="toggleVideoPlayback()">⏸ PAUSAR</button>
-      </div>
-    </div>
+<div class="category">
+  <div class="category-title">Biblioteca</div>
+  <div class="control-group">
+    <label>Pasta raiz do Drive:</label>
+    <input type="text" id="biblioteca-root-id" placeholder="ID da pasta raiz">
+    <button class="btn-full" style="background:#444" onclick="BibliotecaPlugin.UI.sincronizar()">🔄 Sincronizar Biblioteca</button>
+    <div id="biblioteca-status" style="font-size:0.72em;color:#aaa;margin-top:4px;min-height:16px;"></div>
+    <div id="biblioteca-contagem" style="font-size:0.7em;color:#666;min-height:14px;"></div>
+  </div>
+  <div class="control-group">
+    <label>Mapas:</label>
+    <div id="drive-library" class="drive-list"></div>
+  </div>
+  <div id="video-controls" style="display:none;">
+    <button class="btn-full" id="play-pause-btn" onclick="toggleVideoPlayback()">⏸ PAUSAR</button>
+  </div>
+</div>
     <div class="category">
       <div class="category-title">Ferramentas de Grid</div>
       <div class="control-group">

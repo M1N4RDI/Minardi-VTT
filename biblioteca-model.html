@@ -1,0 +1,132 @@
+<script>
+// ============================================================
+// MINARDI VTT — BibliotecaPlugin
+// biblioteca-model.html — Biblioteca raiz unificada (Etapa 0)
+// ============================================================
+// Fonte da verdade central para todos os assets do Drive.
+// Armazena apenas metadados — nunca base64.
+// Todos os plugins leem seus assets daqui.
+// ============================================================
+console.log("biblioteca-model carregado");
+
+window.BibliotecaPlugin = window.BibliotecaPlugin || {};
+
+BibliotecaPlugin.Model = {
+
+  // ID da pasta raiz informada pelo usuário
+  rootFolderId: null,
+
+  // Todos os assets escaneados
+  // Cada item: { id, nome, mimeType, tamanho, caminho, assetType }
+  _assets: [],
+
+  // Status do último scan
+  _status: "idle", // "idle" | "scanning" | "pronto" | "erro"
+  _erroMsg: null,
+  _totalAssets: 0,
+  _ultimoScan: null,
+
+  // ---- Init ----
+
+  init() {
+    this._carregarDoStorage();
+    console.log("BibliotecaPlugin.Model INIT — rootFolderId:", this.rootFolderId);
+  },
+
+  // ---- Acesso aos assets ----
+
+  // Retorna todos os assets de um tipo
+  getAssetsPorTipo(assetType) {
+    return this._assets.filter(function(a) { return a.assetType === assetType; });
+  },
+
+  // Retorna um asset pelo fileId do Drive
+  getAssetPorId(driveFileId) {
+    for (var i = 0; i < this._assets.length; i++) {
+      if (this._assets[i].id === driveFileId) return this._assets[i];
+    }
+    return null;
+  },
+
+  // Retorna todos os assets (para debug ou listagem geral)
+  getTodos() {
+    return this._assets.slice();
+  },
+
+  // Contagem por tipo
+  contarPorTipo() {
+    var contagem = {};
+    for (var i = 0; i < this._assets.length; i++) {
+      var t = this._assets[i].assetType;
+      contagem[t] = (contagem[t] || 0) + 1;
+    }
+    return contagem;
+  },
+
+  // ---- Atualização pelo Drive ----
+
+  setAssets(assets) {
+    this._assets       = assets || [];
+    this._totalAssets  = this._assets.length;
+    this._ultimoScan   = new Date().toISOString();
+    this._status       = "pronto";
+    this._erroMsg      = null;
+    this._salvarNoStorage();
+  },
+
+  setErro(msg) {
+    this._status  = "erro";
+    this._erroMsg = msg;
+  },
+
+  setScanning() {
+    this._status  = "scanning";
+    this._erroMsg = null;
+  },
+
+  getStatus() {
+    return {
+      status:      this._status,
+      erro:        this._erroMsg,
+      total:       this._totalAssets,
+      ultimoScan:  this._ultimoScan
+    };
+  },
+
+  isConectado() {
+    return !!this.rootFolderId;
+  },
+
+  // ---- Persistência ----
+
+  _salvarNoStorage() {
+    try {
+      var data = {
+        rootFolderId: this.rootFolderId,
+        assets:       this._assets,
+        ultimoScan:   this._ultimoScan
+      };
+      localStorage.setItem("vtt_biblioteca_v1", JSON.stringify(data));
+    } catch(e) {
+      console.warn("BibliotecaPlugin.Model: erro ao salvar storage.", e);
+    }
+  },
+
+  _carregarDoStorage() {
+    try {
+      var raw = localStorage.getItem("vtt_biblioteca_v1");
+      if (!raw) return;
+      var d = JSON.parse(raw);
+      if (d.rootFolderId) this.rootFolderId = d.rootFolderId;
+      if (d.assets)       this._assets      = d.assets;
+      if (d.ultimoScan)   this._ultimoScan  = d.ultimoScan;
+      if (this._assets.length > 0) {
+        this._status     = "pronto";
+        this._totalAssets = this._assets.length;
+      }
+    } catch(e) {
+      console.warn("BibliotecaPlugin.Model: erro ao carregar storage.", e);
+    }
+  }
+};
+</script>

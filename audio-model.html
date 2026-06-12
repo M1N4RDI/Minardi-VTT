@@ -137,6 +137,10 @@ AudioPlugin.Model = {
       if (d.soundscapes)     this.soundscapes             = d.soundscapes;
       if (d.favoriteEffects) this.favoriteEffects         = d.favoriteEffects;
       if (d.playlistMode)    this.playlist.mode           = d.playlistMode;
+      // Etapa 0: se não há audioFolderId salvo mas a biblioteca raiz
+      // já foi escaneada, não bloqueia o boot do AudioPlugin.
+      // O áudio continuará sendo carregado pelo fluxo existente
+      // enquanto a migração completa não ocorre (Etapa 1).
     } catch(e) {
       console.warn("AudioPlugin.Model: erro ao carregar storage.", e);
     }

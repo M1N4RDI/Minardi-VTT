@@ -24,6 +24,16 @@ AudioPlugin.Drive = {
   connect(onSuccess, onError) {
     if (this._scanning) return;
     this._scanning = true;
+    // Etapa 0: se já temos a pasta Audio/ identificada via biblioteca raiz,
+    // podemos pular o ensureAudioStructure e ir direto para scanLibrary.
+    // Isso evita criar estrutura de pastas duplicada.
+    var audioAssets = window.BibliotecaPlugin
+      ? BibliotecaPlugin.Model.getAssetsPorTipo("audio")
+      : [];
+    if (audioAssets.length > 0 && AudioPlugin.Model.audioFolderId) {
+      this.scanLibrary(onSuccess, onError);
+      return;
+    }
     AudioPlugin.UI.setStatus("Verificando estrutura no Drive...");
 
     google.script.run
