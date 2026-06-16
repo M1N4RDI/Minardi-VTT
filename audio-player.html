@@ -43,6 +43,28 @@ AudioPlugin.Player = {
     });
   },
 
+// Carrega um arquivo de áudio sob demanda pelo fileId do Drive,
+  // depois executa o callback com a dataUrl.
+  _loadAudioById(fileId, cb) {
+    // Cache simples em memória para evitar re-fetch da mesma faixa
+    if (!this._audioCache) this._audioCache = {};
+    if (this._audioCache[fileId]) { cb(this._audioCache[fileId]); return; }
+
+    google.script.run
+      .withSuccessHandler(result => {
+        if (result && result.dataUrl) {
+          this._audioCache[fileId] = result.dataUrl;
+          cb(result.dataUrl);
+        } else {
+          console.warn("AudioPlugin.Player: falha ao carregar fileId", fileId, result);
+        }
+      })
+      .withFailureHandler(err => {
+        console.warn("AudioPlugin.Player: RPC falhou", err.message);
+      })
+      .getFileAsDataUrl(fileId);
+  },
+
   playMusic(url, fade) {
     if (!url) return;
     if (fade && this._musicEl.src && !this._musicEl.paused) {

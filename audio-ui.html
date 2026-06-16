@@ -34,9 +34,8 @@ AudioPlugin.UI = {
     cat.innerHTML = `
       <div class="category-title">🎵 Áudio</div>
       <div class="control-group">
-        <label>Pasta Audio/ no Drive:</label>
-        <input type="text" id="audio-folder-id" placeholder="ID da pasta Audio/ (opcional)">
-        <button class="btn-full" style="background:#555;" onclick="AudioPlugin.UI._onConnectClick()">Conectar Drive</button>
+        <!-- Pasta detectada automaticamente pela Biblioteca -->
+      <button class="btn-full" style="background:#555;" onclick="AudioPlugin.Drive.rescanLibrary()">🔄 Sincronizar Áudio</button>
         <div id="audio-status" style="font-size:0.72em;color:#aaa;margin-top:4px;min-height:16px;"></div>
       </div>
       <div class="control-group">
@@ -47,20 +46,6 @@ AudioPlugin.UI = {
       <div id="audio-nowplaying" style="margin-top:8px;padding:6px 8px;background:rgba(0,0,0,0.2);border-radius:4px;font-size:0.75em;color:#aaa;min-height:20px;display:none;"></div>
     `;
     sidebar.appendChild(cat);
-    const saved = AudioPlugin.Model.audioFolderId;
-    if (saved) document.getElementById("audio-folder-id").value = saved;
-  },
-
-  _onConnectClick() {
-    const input = document.getElementById("audio-folder-id");
-    const id = input ? input.value.trim() : "";
-    if (id) {
-      AudioPlugin.Model.audioFolderId = id;
-      AudioPlugin.Model._saveToStorage();
-      AudioPlugin.Drive.scanLibrary();
-    } else {
-      AudioPlugin.Drive.connect();
-    }
   },
 
   _tryAutoConnect() {
@@ -611,7 +596,7 @@ AudioPlugin.UI = {
     const playBtn = document.createElement("button");
     playBtn.textContent = "🔊 " + track.name;
     playBtn.style.cssText = `padding:7px 12px;background:transparent;color:#ccc;border:none;cursor:pointer;font-size:0.78em;`;
-    playBtn.onclick = () => AudioPlugin.Control.triggerEffect(track.url);
+    playBtn.onclick = () => AudioPlugin.Control.triggerEffect(track.url || track.id, !track.url && !!track.id);
     playBtn.addEventListener("mouseenter", () => { playBtn.style.color = "#fff"; wrapper.style.borderColor = "rgba(255,255,255,0.15)"; });
     playBtn.addEventListener("mouseleave", () => { playBtn.style.color = "#ccc"; wrapper.style.borderColor = "rgba(255,255,255,0.07)"; });
 

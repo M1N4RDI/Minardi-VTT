@@ -441,6 +441,26 @@ function connectDrive() {
   }
 }
 
+// Ativa/desativa modo de medição (régua, raio, cone)
+function toggleMeasureMode() {
+  var btn = document.getElementById('measure-toggle-btn');
+  if (!btn) return;
+
+  if (VTTMode.is('measure')) {
+    VTTMode.set('__none__');
+    btn.innerText = '📐 ATIVAR FERRAMENTAS';
+    btn.style.background = '#2f2f2f';
+  } else {
+    VTTMode.set('measure');
+    btn.innerText = '✅ FERRAMENTAS ATIVAS';
+    btn.style.background = '#3a5a3a';
+  }
+}
+
+function selectMap(map) {
+  var img = document.getElementById('map-image'),
+      video = document.getElementById('map-video');
+
 function selectMap(map) {
   var img = document.getElementById('map-image'), video = document.getElementById('map-video');
   if (map.type === 'video') {
@@ -453,7 +473,7 @@ function selectMap(map) {
     document.getElementById('video-controls').style.display = "none";
     img.onload = updateMapSize;
   }
-}
+}}
 
 function toggleVideoPlayback() {
   var v = document.getElementById('map-video'), b = document.getElementById('play-pause-btn');
@@ -488,4 +508,5 @@ function connectTokenDrive() {
     })
     .getTokenImagesFromDrive(id);
 }
+
 </script>

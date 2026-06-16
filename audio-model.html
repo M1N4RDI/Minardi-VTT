@@ -56,8 +56,13 @@ AudioPlugin.Model = {
   // ---- Biblioteca ----
 
   setLibrary(library) {
+    // Aceita tanto o formato antigo { url } quanto o novo { id } (metadados)
     this.library = library;
-    console.log("AudioPlugin.Model: biblioteca carregada.", library);
+    console.log("AudioPlugin.Model: biblioteca carregada.",
+      Object.keys(library.music || {}).length, "cats música,",
+      Object.keys(library.ambience || {}).length, "cats ambiência,",
+      Object.keys(library.effects || {}).length, "cats efeitos."
+    );
   },
 
   getCategories(type) {

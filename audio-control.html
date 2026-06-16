@@ -27,12 +27,24 @@ AudioPlugin.Control = {
   },
 
   playTrack(category, track, fade) {
-    const model = AudioPlugin.Model;
-    const tracks = model.getTracks("music", category);
-    model.playlist.currentCategory = category;
-    model.currentMusic = { category, trackIndex: tracks.indexOf(track), track };
-    AudioPlugin.Player.playMusic(track.url, fade !== false);
+    AudioPlugin.Model.currentMusic = { category, trackIndex: null, track };
+
+    // Se a faixa tem url direta (formato antigo), usa; se tem id, carrega sob demanda
+    if (track.url) {
+      AudioPlugin.Player.playMusic(track.url, fade);
+    } else if (track.id) {
+      AudioPlugin.UI.setStatus("⏳ Carregando faixa...");
+      AudioPlugin.Player._loadAudioById(track.id, function(dataUrl) {
+        AudioPlugin.UI.setStatus("▶ " + track.name);
+        AudioPlugin.Player.playMusic(dataUrl, fade);
+      });
+    }
+
     AudioPlugin.UI.updateNowPlaying();
+    AudioPlugin.UI._updatePlayerControls();
+    if (AudioPlugin.UI._expandedCategory === category) {
+      AudioPlugin.UI._renderMusicTab();
+    }
   },
 
   advancePlaylist() {
@@ -80,20 +92,30 @@ AudioPlugin.Control = {
 
   // ---- AMBIÊNCIAS ----
 
-  toggleAmbience(category) {
-    const model  = AudioPlugin.Model;
-    const tracks = model.getTracks("ambience", category);
-    if (!tracks.length) return;
+ toggleAmbience(category) {
+    const model = AudioPlugin.Model;
     if (model.activeAmbiences[category]) {
       AudioPlugin.Player.stopAmbience(category);
       delete model.activeAmbiences[category];
+      AudioPlugin.UI.updateAmbienceState();
     } else {
-      const track = tracks[0];
-      const vol   = model.volumes.ambience;
-      model.activeAmbiences[category] = { track, volume: vol };
-      AudioPlugin.Player.startAmbience(category, track.url, vol);
+      const tracks = model.getTracks("ambience", category);
+      if (!tracks.length) return;
+      const track = tracks[Math.floor(Math.random() * tracks.length)];
+      model.activeAmbiences[category] = { track, volume: model.volumes.ambience };
+
+      if (track.url) {
+        AudioPlugin.Player.startAmbience(category, track.url, model.volumes.ambience);
+        AudioPlugin.UI.updateAmbienceState();
+      } else if (track.id) {
+        AudioPlugin.UI.setStatus("⏳ Carregando ambiência...");
+        AudioPlugin.Player._loadAudioById(track.id, function(dataUrl) {
+          AudioPlugin.UI.setStatus("✅ " + category + " ativa");
+          AudioPlugin.Player.startAmbience(category, dataUrl, model.volumes.ambience);
+          AudioPlugin.UI.updateAmbienceState();
+        });
+      }
     }
-    AudioPlugin.UI.updateAmbienceState();
   },
 
   stopAllAmbiences() {
@@ -104,7 +126,17 @@ AudioPlugin.Control = {
 
   // ---- EFEITOS ----
 
-  triggerEffect(url) { AudioPlugin.Player.playEffect(url); },
+triggerEffect(urlOrId, isId) {
+    // Aceita url direta ou fileId
+    if (!isId && urlOrId && urlOrId.startsWith("data:")) {
+      AudioPlugin.Player.playEffect(urlOrId);
+    } else if (urlOrId) {
+      // É um fileId
+      AudioPlugin.Player._loadAudioById(urlOrId, function(dataUrl) {
+        AudioPlugin.Player.playEffect(dataUrl);
+      });
+    }
+  },
 
   // ---- SOUNDSCAPES ----
 

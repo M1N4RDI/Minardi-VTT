@@ -193,6 +193,81 @@ function scanAudioLibrary(audioFolderId) {
   }
 }
 
+// ============================================================
+// scanAudioLibraryMetadata — retorna apenas metadados (sem base64).
+// Resolve o timeout com bibliotecas grandes (110+ arquivos).
+// Cada item: { id, name, mimeType, category, type }
+// type: "music" | "ambience" | "effects"
+// category: nome da subpasta (ex: "Combat", "Rain")
+// ============================================================
+function scanAudioLibraryMetadata(audioFolderId) {
+  try {
+    if (!audioFolderId) return { error: "audioFolderId ausente." };
+
+    var result = { music: {}, ambience: {}, effects: {} };
+
+    var audioFolder;
+    try {
+      audioFolder = DriveApp.getFolderById(audioFolderId);
+    } catch(e) {
+      return { error: "Pasta não encontrada: " + e.toString() };
+    }
+
+    // Mapeia nomes de subpasta para tipo
+    var typeMap = {
+      "music": "music", "musica": "music", "música": "music",
+      "ambience": "ambience", "ambiencia": "ambience", "ambiência": "ambience", "ambiance": "ambience",
+      "effects": "effects", "efeitos": "effects", "effect": "effects"
+    };
+
+    var typeIter = audioFolder.getFolders();
+    while (typeIter.hasNext()) {
+      var typeFolder = typeIter.next();
+      var typeName   = typeFolder.getName().toLowerCase();
+      var type       = typeMap[typeName] || null;
+      if (!type) continue;
+
+      // Subcategorias (Combat, Rain, etc.)
+      var catIter = typeFolder.getFolders();
+      while (catIter.hasNext()) {
+        var catFolder  = catIter.next();
+        var catName    = catFolder.getName();
+        result[type][catName] = result[type][catName] || [];
+
+        var fileIter = catFolder.getFiles();
+        while (fileIter.hasNext()) {
+          var file = fileIter.next();
+          var mime = file.getMimeType();
+          if (mime.indexOf("audio/") !== 0) continue;
+          result[type][catName].push({
+            id:       file.getId(),
+            name:     file.getName().replace(/\.[^.]+$/, ""), // remove extensão
+            mimeType: mime
+          });
+        }
+      }
+
+      // Arquivos soltos direto na pasta de tipo (sem categoria)
+      var looseIter = typeFolder.getFiles();
+      while (looseIter.hasNext()) {
+        var looseFile = looseIter.next();
+        var looseMime = looseFile.getMimeType();
+        if (looseMime.indexOf("audio/") !== 0) continue;
+        result[type]["Geral"] = result[type]["Geral"] || [];
+        result[type]["Geral"].push({
+          id:       looseFile.getId(),
+          name:     looseFile.getName().replace(/\.[^.]+$/, ""),
+          mimeType: looseMime
+        });
+      }
+    }
+
+    return result;
+  } catch(e) {
+    return { error: e.toString() };
+  }
+}
+
 /**
  * Retorna apenas o ID da pasta Audio/ dentro de Minardi VTT/
  * Útil para o primeiro boot sem precisar re-escanear tudo.

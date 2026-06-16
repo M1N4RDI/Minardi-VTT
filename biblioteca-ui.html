@@ -39,7 +39,10 @@ BibliotecaPlugin.UI = {
     var input = document.getElementById("biblioteca-root-id");
     if (!input) return;
 
-    var id = input.value.trim();
+    var raw = input.value.trim();
+    // Aceita link completo: extrai o ID
+    var match = raw.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    var id = match ? match[1] : raw;
     if (!id) {
       this._setStatus("⚠️ Informe o ID da pasta raiz.");
       return;
@@ -131,7 +134,12 @@ BibliotecaPlugin.UI = {
       else if (!mapa[m.driveFileId].dataUrl && m.dataUrl) mapa[m.driveFileId].dataUrl = m.dataUrl;
     });
 
-    TokenPlugin.Model.setImageLibrary(Object.values(mapa));
+    var lista = Object.values(mapa);
+    TokenPlugin.Model.setImageLibrary(lista);
+    // Alimenta o explorador visual de tokens se já existir
+    if (typeof window._tokenRenderGallery === "function") {
+      window._tokenRenderGallery(lista);
+    }
   },
 
   // ---- Notifica AudioPlugin sobre os assets de áudio ----

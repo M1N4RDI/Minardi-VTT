@@ -30,68 +30,39 @@ AudioPlugin.Drive = {
     var audioAssets = window.BibliotecaPlugin
       ? BibliotecaPlugin.Model.getAssetsPorTipo("audio")
       : [];
-    if (audioAssets.length > 0 && AudioPlugin.Model.audioFolderId) {
-      this.scanLibrary(onSuccess, onError);
-      return;
-    }
-    AudioPlugin.UI.setStatus("Verificando estrutura no Drive...");
+  },  
 
-    google.script.run
-      .withSuccessHandler(result => {
-        if (result.error) {
-          this._scanning = false;
-          AudioPlugin.UI.setStatus("Erro: " + result.error);
-          if (onError) onError(result.error);
-          return;
-        }
-
-        AudioPlugin.Model.audioFolderId = result.audioFolderId;
-        AudioPlugin.Model._saveToStorage();
-        this.scanLibrary(onSuccess, onError);
-      })
-      .withFailureHandler(err => {
-        this._scanning = false;
-        AudioPlugin.UI.setStatus("Falha ao conectar: " + err.message);
-        if (onError) onError(err.message);
-      })
-      .ensureAudioStructure();
-  },
-
-  // ============================================================
-  // Escaneia a biblioteca a partir do audioFolderId salvo.
-  // ============================================================
-
-  scanLibrary(onSuccess, onError) {
+scanLibrary(onSuccess, onError) {
     const folderId = AudioPlugin.Model.audioFolderId;
     if (!folderId) {
       AudioPlugin.UI.setStatus("Nenhuma pasta configurada.");
+      this._scanning = false;
       return;
     }
 
     AudioPlugin.UI.setStatus("Escaneando biblioteca...");
 
+    // Usa scanAudioLibraryMetadata — retorna apenas metadados, sem base64.
+    // O áudio é carregado sob demanda ao clicar em uma faixa.
     google.script.run
       .withSuccessHandler(library => {
         this._scanning = false;
-
         if (library.error) {
           AudioPlugin.UI.setStatus("Erro ao escanear: " + library.error);
           if (onError) onError(library.error);
           return;
         }
-
         AudioPlugin.Model.setLibrary(library);
         AudioPlugin.UI.renderLibrary();
-        AudioPlugin.UI.setStatus("Biblioteca pronta.");
-
+        AudioPlugin.UI.setStatus("✅ Biblioteca pronta.");
         if (onSuccess) onSuccess(library);
       })
       .withFailureHandler(err => {
         this._scanning = false;
-        AudioPlugin.UI.setStatus("Falha ao escanear: " + err.message);
+        AudioPlugin.UI.setStatus("Falha: " + err.message);
         if (onError) onError(err.message);
       })
-      .scanAudioLibrary(folderId);
+      .scanAudioLibraryMetadata(folderId);
   },
 
   // ============================================================

@@ -641,53 +641,93 @@ function injectTokenUI() {
   group.appendChild(btn);
 
   // ---- Pasta de tokens ----
-  const folderInput = document.createElement("input");
-  folderInput.id = "token-folder-id";
-  folderInput.placeholder = "ID da pasta do Drive";
-  const savedTokenFolder = JSON.parse(localStorage.getItem('vtt_minardi_v1') || '{}').tokenFolderId || "";
-  folderInput.value = savedTokenFolder;
-  folderInput.style.cssText = "width:100%;margin-top:6px;padding:6px;background:#1a1a1a;color:white;border:1px solid #555;";
+// Galeria de tokens — alimentada pela BibliotecaPlugin (sem campo de ID)
+    const gallery = document.createElement("div");
+    gallery.id = "token-gallery-root";
+    gallery.style.cssText = "margin-top:6px;max-height:260px;overflow-y:auto;";
 
-  const loadBtn = document.createElement("button");
-  loadBtn.innerText = "📂 Carregar Tokens";
-  loadBtn.style.cssText = "width:100%;margin-top:4px;padding:6px;background:#444;color:white;border:1px solid #555;cursor:pointer;";
+    // Renderiza explorador de subpastas com miniaturas
+    function renderGallery(files) {
+      gallery.innerHTML = "";
 
-  const gallery = document.createElement("div");
-  gallery.style.cssText = "margin-top:6px;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-height:200px;overflow-y:auto;";
+      // Agrupa por caminho (subpasta)
+      var grupos = {};
+      files.forEach(function(file) {
+        var pasta = file.caminho || "Tokens";
+        // Pega só o último segmento relevante
+        var partes = pasta.split("/");
+        var subpasta = partes[partes.length - 1] || "Tokens";
+        grupos[subpasta] = grupos[subpasta] || [];
+        grupos[subpasta].push(file);
+      });
 
-  loadBtn.onclick = () => {
-    const id = folderInput.value.trim();
-    if (!id) return alert("Informe o ID da pasta.");
-    google.script.run
-      .withSuccessHandler(files => {
-        if (!files || !files.length) { alert("Nenhuma imagem encontrada."); return; }
-        TokenPlugin.Model.setImageLibrary(files);
-        renderGallery(files);
-      })
-      .getTokenImagesFromDrive(id);
-  };
+      var pastaNomes = Object.keys(grupos).sort();
 
-  function renderGallery(files) {
-    gallery.innerHTML = "";
-    files.forEach(file => {
-      const img = document.createElement("img");
-      img.src = file.dataUrl;
-      img.style.cssText = "width:100%;cursor:pointer;border:2px solid transparent;border-radius:4px;";
-      img.draggable = true;
-      img.addEventListener("dragstart", (e) => { e.dataTransfer.setData("token-image", file.dataUrl); });
-      img.onclick = () => {
-        const selected = TokenPlugin.Model.getSelected()[0];
-        if (!selected) { alert("Selecione um token primeiro."); return; }
-        selected.appearance.image = file.dataUrl;
-        TokenPlugin.Canvas.draw();
-      };
-      gallery.appendChild(img);
-    });
-  }
+      pastaNomes.forEach(function(pasta) {
+        var arquivos = grupos[pasta];
 
-  group.appendChild(folderInput);
-  group.appendChild(loadBtn);
-  group.appendChild(gallery);
+        // Cabeçalho de pasta (clicável para expandir/recolher)
+        var header = document.createElement("div");
+        header.style.cssText = "font-size:0.72em;color:#aaa;padding:4px 2px;cursor:pointer;display:flex;align-items:center;gap:4px;user-select:none;";
+        header.innerHTML = "<span class='pasta-seta'>▸</span> 📁 " + pasta + " <span style='color:#555;'>(" + arquivos.length + ")</span>";
+
+        var grid = document.createElement("div");
+        grid.style.cssText = "display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:6px;display:none;";
+
+        header.addEventListener("click", function() {
+          var aberto = grid.style.display !== "none";
+          grid.style.display = aberto ? "none" : "grid";
+          header.querySelector(".pasta-seta").textContent = aberto ? "▸" : "▾";
+        });
+
+        // Expande automaticamente se for pasta única
+        if (pastaNomes.length === 1) {
+          grid.style.display = "grid";
+          header.querySelector(".pasta-seta").textContent = "▾";
+        }
+
+        arquivos.forEach(function(file) {
+          if (!file.dataUrl) return; // sem miniatura ainda
+          var img = document.createElement("img");
+          img.src = file.dataUrl;
+          img.title = file.nome || file.name || "";
+          img.style.cssText = "width:100%;cursor:pointer;border:2px solid transparent;border-radius:4px;aspect-ratio:1;object-fit:cover;";
+          img.draggable = true;
+          img.addEventListener("dragstart", function(e) {
+            e.dataTransfer.setData("token-image", file.dataUrl);
+          });
+          img.onclick = function() {
+            var selected = TokenPlugin.Model.getSelected()[0];
+            if (!selected) { alert("Selecione um token primeiro."); return; }
+            selected.appearance.image = file.dataUrl;
+            TokenPlugin.Canvas.draw();
+          };
+          grid.appendChild(img);
+        });
+
+        gallery.appendChild(header);
+        gallery.appendChild(grid);
+      });
+
+      // Atualiza biblioteca do modelo
+      TokenPlugin.Model.setImageLibrary(files);
+    }
+
+    // Expõe renderGallery para que BibliotecaPlugin possa alimentar
+    window._tokenRenderGallery = renderGallery;
+
+    group.appendChild(gallery);
+
+    // Tenta popular a galeria com o que já há na biblioteca
+    (function _tryPopulateTokenGallery() {
+      var t = setInterval(function() {
+        if (window.BibliotecaPlugin && BibliotecaPlugin.Model._assets.length > 0) {
+          clearInterval(t);
+          var tokenAssets = BibliotecaPlugin.Model.getAssetsPorTipo("tokenImage");
+          if (tokenAssets.length > 0) renderGallery(tokenAssets);
+        }
+      }, 300);
+    })();
   category.appendChild(group);
   sidebar.appendChild(category);
 
