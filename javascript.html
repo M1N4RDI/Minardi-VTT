@@ -458,10 +458,6 @@ function toggleMeasureMode() {
 }
 
 function selectMap(map) {
-  var img = document.getElementById('map-image'),
-      video = document.getElementById('map-video');
-
-function selectMap(map) {
   var img = document.getElementById('map-image'), video = document.getElementById('map-video');
   if (map.type === 'video') {
     img.style.display = "none"; video.style.display = "block"; video.src = map.dataUrl;
@@ -473,7 +469,7 @@ function selectMap(map) {
     document.getElementById('video-controls').style.display = "none";
     img.onload = updateMapSize;
   }
-}}
+}
 
 function toggleVideoPlayback() {
   var v = document.getElementById('map-video'), b = document.getElementById('play-pause-btn');

@@ -14,81 +14,151 @@ AudioPlugin.Control = {
 
   // ---- MÚSICA ----
 
-  playCategory(category, fade) {
-    const model  = AudioPlugin.Model;
-    const tracks = model.getTracks("music", category);
-    if (!tracks.length) return;
-    model.playlist.currentCategory = category;
-    const track = this._pickTrack(tracks, model.playlist);
-    model.currentMusic = { category, trackIndex: tracks.indexOf(track), track };
-    AudioPlugin.Player.playMusic(track.url, fade !== false);
-    AudioPlugin.UI.updateNowPlaying();
-    AudioPlugin.UI._renderMusicTab(); // atualiza destaque da categoria
-  },
+playCategory(category, fade) {
+ const model = AudioPlugin.Model;
 
-  playTrack(category, track, fade) {
-    AudioPlugin.Model.currentMusic = { category, trackIndex: null, track };
+ const tracks = model.getTracks("music", category);
 
-    // Se a faixa tem url direta (formato antigo), usa; se tem id, carrega sob demanda
-    if (track.url) {
-      AudioPlugin.Player.playMusic(track.url, fade);
-    } else if (track.id) {
-      AudioPlugin.UI.setStatus("⏳ Carregando faixa...");
-      AudioPlugin.Player._loadAudioById(track.id, function(dataUrl) {
-        AudioPlugin.UI.setStatus("▶ " + track.name);
-        AudioPlugin.Player.playMusic(dataUrl, fade);
-      });
-    }
+ if (!tracks.length) return;
 
-    AudioPlugin.UI.updateNowPlaying();
-    AudioPlugin.UI._updatePlayerControls();
-    if (AudioPlugin.UI._expandedCategory === category) {
-      AudioPlugin.UI._renderMusicTab();
-    }
-  },
+ model.playlist.currentCategory = category;
 
-  advancePlaylist() {
-    const model = AudioPlugin.Model;
-    const cat   = model.playlist.currentCategory;
-    if (!cat) return;
-    if (model.playlist.mode === "single") return;
-    this.playCategory(cat, true);
-  },
+ const track = this._pickTrack(tracks, model.playlist);
 
-  prevTrack() {
-    const model  = AudioPlugin.Model;
-    const cur    = model.currentMusic;
-    if (!cur) return;
-    const tracks = model.getTracks("music", cur.category);
-    if (!tracks.length) return;
-    const idx  = tracks.findIndex(t => t.url === cur.track.url);
-    const prev = tracks[((idx - 1) + tracks.length) % tracks.length];
-    this.playTrack(cur.category, prev, true);
-  },
+ this.playTrack(category, track, fade !== false);
 
-  nextTrack() {
-    const model  = AudioPlugin.Model;
-    const cur    = model.currentMusic;
-    if (!cur) return;
-    const tracks = model.getTracks("music", cur.category);
-    if (!tracks.length) return;
-    const idx  = tracks.findIndex(t => t.url === cur.track.url);
-    const next = tracks[(idx + 1) % tracks.length];
-    this.playTrack(cur.category, next, true);
-  },
+ },
 
-  _pickTrack(tracks, playlist) {
-    if (tracks.length === 1) return tracks[0];
-    if (playlist.mode === "sequential") {
-      const cur  = AudioPlugin.Model.currentMusic;
-      const idx  = cur ? tracks.findIndex(t => t.url === cur.track.url) : -1;
-      return tracks[(idx + 1) % tracks.length];
-    }
-    const cur  = AudioPlugin.Model.currentMusic;
-    const last = cur ? cur.track.url : null;
-    const pool = tracks.filter(t => t.url !== last);
-    return pool[Math.floor(Math.random() * pool.length)];
-  },
+ playTrack(category, track, fade) {
+ const tracks = AudioPlugin.Model.getTracks("music", category);
+ const trackIndex = this._findTrackIndex(tracks, track);
+
+ AudioPlugin.Model.currentMusic = { category, trackIndex, track };
+ AudioPlugin.Model.playlist.currentCategory = category;
+
+ // Se a faixa tem url direta (formato antigo), usa; se tem id, carrega sob demanda
+
+ if (track.url) {
+
+ AudioPlugin.Player.playMusic(track.url, fade);
+
+ } else if (track.id) {
+
+ AudioPlugin.UI.setStatus("⏳ Carregando faixa...");
+
+ AudioPlugin.Player._loadAudioById(track.id, function(dataUrl) {
+
+ AudioPlugin.UI.setStatus("▶ " + track.name);
+
+ AudioPlugin.Player.playMusic(dataUrl, fade);
+
+ });
+
+ }
+
+ AudioPlugin.UI.updateNowPlaying();
+ AudioPlugin.UI._updatePlayerControls();
+
+ if (AudioPlugin.UI._expandedCategory === category) {
+
+ AudioPlugin.UI._renderMusicTab();
+
+ }
+
+ },
+
+ advancePlaylist() {
+
+ const model = AudioPlugin.Model;
+
+ const cat = model.playlist.currentCategory;
+
+ if (!cat) return;
+
+ if (model.playlist.mode === "single") return;
+
+ this.playCategory(cat, true);
+
+ },
+
+ prevTrack() {
+
+ const model = AudioPlugin.Model;
+
+ const cur = model.currentMusic;
+
+ if (!cur) return;
+
+ const tracks = model.getTracks("music", cur.category);
+ if (!tracks.length) return;
+
+ const idx = this._findTrackIndex(tracks, cur.track);
+
+ const prev = tracks[((idx - 1) + tracks.length) % tracks.length];
+
+ this.playTrack(cur.category, prev, true);
+
+ },
+
+ nextTrack() {
+
+ const model = AudioPlugin.Model;
+
+ const cur = model.currentMusic;
+
+ if (!cur) return;
+
+ const tracks = model.getTracks("music", cur.category);
+
+ if (!tracks.length) return;
+
+ const idx = this._findTrackIndex(tracks, cur.track);
+ const next = tracks[(idx + 1) % tracks.length];
+
+ this.playTrack(cur.category, next, true);
+
+ },
+
+ _trackKey(track) {
+
+ if (!track) return "";
+
+ return track.id || track.url || track.name || "";
+
+ },
+
+ _findTrackIndex(tracks, track) {
+
+ const key = this._trackKey(track);
+
+ const idx = tracks.findIndex(t => this._trackKey(t) === key);
+
+ return idx >= 0 ? idx : 0;
+
+ },
+
+ _pickTrack(tracks, playlist) {
+
+ if (tracks.length === 1) return tracks[0];
+
+ if (playlist.mode === "sequential") {
+
+ const cur = AudioPlugin.Model.currentMusic;
+
+ const idx = cur ? this._findTrackIndex(tracks, cur.track) : -1;
+
+ return tracks[(idx + 1) % tracks.length];
+
+ }
+
+ const cur = AudioPlugin.Model.currentMusic;
+
+ const last = cur ? this._trackKey(cur.track) : null;
+ const pool = tracks.filter(t => this._trackKey(t) !== last);
+
+ return pool[Math.floor(Math.random() * pool.length)];
+
+ },
 
   // ---- AMBIÊNCIAS ----
 

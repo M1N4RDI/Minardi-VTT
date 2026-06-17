@@ -647,71 +647,302 @@ function injectTokenUI() {
     gallery.style.cssText = "margin-top:6px;max-height:260px;overflow-y:auto;";
 
     // Renderiza explorador de subpastas com miniaturas
-    function renderGallery(files) {
-      gallery.innerHTML = "";
+function renderGallery(files) {
 
-      // Agrupa por caminho (subpasta)
-      var grupos = {};
-      files.forEach(function(file) {
-        var pasta = file.caminho || "Tokens";
-        // Pega só o último segmento relevante
-        var partes = pasta.split("/");
-        var subpasta = partes[partes.length - 1] || "Tokens";
-        grupos[subpasta] = grupos[subpasta] || [];
-        grupos[subpasta].push(file);
-      });
+ gallery.innerHTML = "";
 
-      var pastaNomes = Object.keys(grupos).sort();
+ TokenPlugin._thumbCache = TokenPlugin._thumbCache || {};
+ TokenPlugin._thumbQueue = TokenPlugin._thumbQueue || [];
+ TokenPlugin._thumbLoading = TokenPlugin._thumbLoading || 0;
+ TokenPlugin._thumbObserver = TokenPlugin._thumbObserver || null;
 
-      pastaNomes.forEach(function(pasta) {
-        var arquivos = grupos[pasta];
+ var PLACEHOLDER = "data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23222'/%3E%3Ctext x='32' y='36' text-anchor='middle' font-size='10' fill='%23aaa'%3Etoken%3C/text%3E%3C/svg%3E";
 
-        // Cabeçalho de pasta (clicável para expandir/recolher)
-        var header = document.createElement("div");
-        header.style.cssText = "font-size:0.72em;color:#aaa;padding:4px 2px;cursor:pointer;display:flex;align-items:center;gap:4px;user-select:none;";
-        header.innerHTML = "<span class='pasta-seta'>▸</span> 📁 " + pasta + " <span style='color:#555;'>(" + arquivos.length + ")</span>";
+ function getFileId(file) {
 
-        var grid = document.createElement("div");
-        grid.style.cssText = "display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:6px;display:none;";
+ return file.driveFileId || file.id;
 
-        header.addEventListener("click", function() {
-          var aberto = grid.style.display !== "none";
-          grid.style.display = aberto ? "none" : "grid";
-          header.querySelector(".pasta-seta").textContent = aberto ? "▸" : "▾";
-        });
+ }
 
-        // Expande automaticamente se for pasta única
-        if (pastaNomes.length === 1) {
-          grid.style.display = "grid";
-          header.querySelector(".pasta-seta").textContent = "▾";
-        }
+ function processarFilaMiniaturas() {
 
-        arquivos.forEach(function(file) {
-          if (!file.dataUrl) return; // sem miniatura ainda
-          var img = document.createElement("img");
-          img.src = file.dataUrl;
-          img.title = file.nome || file.name || "";
-          img.style.cssText = "width:100%;cursor:pointer;border:2px solid transparent;border-radius:4px;aspect-ratio:1;object-fit:cover;";
-          img.draggable = true;
-          img.addEventListener("dragstart", function(e) {
-            e.dataTransfer.setData("token-image", file.dataUrl);
-          });
-          img.onclick = function() {
-            var selected = TokenPlugin.Model.getSelected()[0];
-            if (!selected) { alert("Selecione um token primeiro."); return; }
-            selected.appearance.image = file.dataUrl;
-            TokenPlugin.Canvas.draw();
-          };
-          grid.appendChild(img);
-        });
+ while (TokenPlugin._thumbLoading < 3 && TokenPlugin._thumbQueue.length > 0) {
 
-        gallery.appendChild(header);
-        gallery.appendChild(grid);
-      });
+ var item = TokenPlugin._thumbQueue.shift();
+ var file = item.file;
+ var img = item.img;
+ var fileId = getFileId(file);
 
-      // Atualiza biblioteca do modelo
-      TokenPlugin.Model.setImageLibrary(files);
-    }
+ if (!fileId || file.dataUrl || TokenPlugin._thumbCache[fileId]) {
+
+ if (TokenPlugin._thumbCache[fileId]) {
+
+ file.dataUrl = TokenPlugin._thumbCache[fileId];
+ img.src = file.dataUrl;
+ img.style.opacity = "1";
+
+ }
+
+ continue;
+
+ }
+
+ TokenPlugin._thumbLoading++;
+ img.style.opacity = "0.45";
+
+ google.script.run
+
+ .withSuccessHandler(function(resultado) {
+
+ TokenPlugin._thumbLoading--;
+
+ if (resultado && !resultado.erro && resultado.dataUrl) {
+
+ file.dataUrl = resultado.dataUrl;
+ TokenPlugin._thumbCache[getFileId(file)] = resultado.dataUrl;
+ img.src = resultado.dataUrl;
+ img.style.opacity = "1";
+
+ TokenPlugin.Model.setImageLibrary(files);
+
+ } else {
+
+ console.warn("Falha ao carregar miniatura do token:", file.name || file.nome, resultado && resultado.erro);
+
+ }
+
+ processarFilaMiniaturas();
+
+ })
+
+ .withFailureHandler(function(err) {
+
+ TokenPlugin._thumbLoading--;
+
+ console.warn("RPC falhou ao carregar miniatura do token:", err.message);
+
+ processarFilaMiniaturas();
+
+ })
+
+ .getFileAsDataUrl(fileId);
+
+ }
+
+ }
+
+ function pedirMiniatura(file, img) {
+
+ var fileId = getFileId(file);
+
+ if (!fileId) return;
+
+ if (file.dataUrl) {
+
+ img.src = file.dataUrl;
+ img.style.opacity = "1";
+
+ return;
+
+ }
+
+ if (TokenPlugin._thumbCache[fileId]) {
+
+ file.dataUrl = TokenPlugin._thumbCache[fileId];
+ img.src = file.dataUrl;
+ img.style.opacity = "1";
+
+ return;
+
+ }
+
+ if (img.dataset.thumbQueued === "1") return;
+
+ img.dataset.thumbQueued = "1";
+ TokenPlugin._thumbQueue.push({ file: file, img: img });
+
+ processarFilaMiniaturas();
+
+ }
+
+ if (TokenPlugin._thumbObserver) {
+
+ TokenPlugin._thumbObserver.disconnect();
+
+ }
+
+ if ("IntersectionObserver" in window) {
+
+ TokenPlugin._thumbObserver = new IntersectionObserver(function(entries) {
+
+ entries.forEach(function(entry) {
+
+ if (!entry.isIntersecting) return;
+
+ var img = entry.target;
+ var file = img._tokenFile;
+
+ TokenPlugin._thumbObserver.unobserve(img);
+
+ pedirMiniatura(file, img);
+
+ });
+
+ }, {
+ root: gallery,
+ rootMargin: "80px",
+ threshold: 0.01
+ });
+
+ } else {
+
+ TokenPlugin._thumbObserver = null;
+
+ }
+
+ // Agrupa por caminho (subpasta)
+
+ var grupos = {};
+
+ files.forEach(function(file) {
+
+ var pasta = file.caminho || "Tokens";
+
+ // Pega só o último segmento relevante
+
+ var partes = pasta.split("/");
+ var subpasta = partes[partes.length - 1] || "Tokens";
+
+ grupos[subpasta] = grupos[subpasta] || [];
+
+ grupos[subpasta].push(file);
+
+ });
+
+ var pastaNomes = Object.keys(grupos).sort();
+
+ pastaNomes.forEach(function(pasta) {
+
+ var arquivos = grupos[pasta];
+
+ // Cabeçalho de pasta (clicável para expandir/recolher)
+
+ var header = document.createElement("div");
+
+ header.style.cssText = "font-size:0.72em;color:#aaa;padding:4px 2px;cursor:pointer;display:flex;align-items:center;gap:4px;user-select:none;";
+ header.innerHTML = "<span class='pasta-seta'>▸</span> " + pasta + " <span style='color:#555;'>(" + arquivos.length + ")</span>";
+
+ var grid = document.createElement("div");
+
+ grid.style.cssText = "display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:6px;display:none;";
+
+ header.addEventListener("click", function() {
+
+ var aberto = grid.style.display !== "none";
+
+ grid.style.display = aberto ? "none" : "grid";
+
+ header.querySelector(".pasta-seta").textContent = aberto ? "▸" : "▾";
+
+ if (!aberto) {
+
+ Array.prototype.forEach.call(grid.querySelectorAll("img[data-token-thumb='1']"), function(img) {
+
+ if (TokenPlugin._thumbObserver) {
+
+ TokenPlugin._thumbObserver.observe(img);
+
+ } else {
+
+ pedirMiniatura(img._tokenFile, img);
+
+ }
+
+ });
+
+ }
+
+ });
+
+ // Expande automaticamente se for pasta única
+
+ if (pastaNomes.length === 1) {
+
+ grid.style.display = "grid";
+
+ header.querySelector(".pasta-seta").textContent = "▾";
+
+ }
+
+ arquivos.forEach(function(file) {
+
+ var img = document.createElement("img");
+
+ img.src = file.dataUrl || PLACEHOLDER;
+
+ img.title = file.nome || file.name || "";
+
+ img.style.cssText = "width:100%;cursor:pointer;border:2px solid transparent;border-radius:4px;aspect-ratio:1;object-fit:cover;";
+ img.draggable = true;
+ img.dataset.tokenThumb = "1";
+ img._tokenFile = file;
+
+ img.addEventListener("dragstart", function(e) {
+
+ if (!file.dataUrl) {
+
+ e.preventDefault();
+
+ return;
+
+ }
+
+ e.dataTransfer.setData("token-image", file.dataUrl);
+
+ });
+
+ img.onclick = function() {
+
+ var selected = TokenPlugin.Model.getSelected()[0];
+
+ if (!selected) { alert("Selecione um token primeiro."); return; }
+
+ if (!file.dataUrl) { alert("A miniatura ainda está carregando."); return; }
+
+ selected.appearance.image = file.dataUrl;
+
+ TokenPlugin.Canvas.draw();
+
+ };
+
+ grid.appendChild(img);
+
+ if (grid.style.display !== "none") {
+
+ if (TokenPlugin._thumbObserver) {
+
+ TokenPlugin._thumbObserver.observe(img);
+
+ } else {
+
+ pedirMiniatura(file, img);
+
+ }
+
+ }
+
+ });
+
+ gallery.appendChild(header);
+
+ gallery.appendChild(grid);
+
+ });
+
+ // Atualiza biblioteca do modelo
+ TokenPlugin.Model.setImageLibrary(files);
+
+ }
 
     // Expõe renderGallery para que BibliotecaPlugin possa alimentar
     window._tokenRenderGallery = renderGallery;
