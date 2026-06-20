@@ -218,6 +218,28 @@ getById(id) {
     return this.tokens.find(t => t.id === id);
 },
 
+restoreAll(tokensArray) {
+    this.clearSelection();
+
+    if (!Array.isArray(tokensArray)) {
+        console.warn("[TokenPlugin.Model] restoreAll recebeu valor inválido, usando array vazio.");
+        tokensArray = [];
+    }
+
+    this.tokens = tokensArray;
+
+    let maxId = 0;
+    this.tokens.forEach(t => {
+        if (typeof t.id === "number" && t.id > maxId) {
+            maxId = t.id;
+        }
+    });
+
+    this.nextId = maxId + 1;
+
+    console.log("[TokenPlugin.Model] restoreAll: " + this.tokens.length + " token(s) restaurado(s).");
+},
+
 };
 
 // =========================

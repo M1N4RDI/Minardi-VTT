@@ -1,0 +1,239 @@
+<script>
+/* ============================================================
+   ScenePlugin.UI + boot
+   ------------------------------------------------------------
+   Seção "CENAS" na sidebar: lista de cenas salvas, botões de
+   Nova/Salvar/Salvar Como/Carregar/Excluir, e toggle de autosave.
+
+   Boot incluído neste mesmo arquivo (em vez de scene-main.html)
+   porque a sequência de inicialização é curta e linear — não há
+   submódulos de canvas ou player que justifiquem polling em
+   múltiplos estágios como nos outros plugins.
+   ============================================================ */
+
+window.ScenePlugin = window.ScenePlugin || {};
+
+ScenePlugin.UI = {
+
+  _container: null,
+
+  init() {
+    this._buildSidebarSection();
+    this.refreshHeader();
+    this.refreshAutosaveToggle();
+
+    // conecta e já lista as cenas existentes
+    ScenePlugin.Control.connectAndRefresh();
+
+    console.log("[ScenePlugin.UI] init OK");
+  },
+
+  _buildSidebarSection() {
+    const sidebar = document.getElementById("sidebar");
+    if (!sidebar) {
+      console.error("[ScenePlugin.UI] #sidebar não encontrado.");
+      return;
+    }
+
+    const section = document.createElement("div");
+    section.className = "sidebar-section";
+    section.id = "scene-section";
+    section.innerHTML = `
+      <h3 class="sidebar-section-title">Cenas</h3>
+
+      <div id="scene-current-name" class="scene-current-name">
+        (cena sem nome)
+      </div>
+
+      <div class="scene-buttons-row">
+        <button id="scene-btn-new" title="Nova Cena">Nova Cena</button>
+        <button id="scene-btn-save" title="Salvar Cena">Salvar Cena</button>
+      </div>
+      <div class="scene-buttons-row">
+        <button id="scene-btn-save-as" title="Salvar Como">Salvar Como</button>
+      </div>
+
+      <label class="scene-autosave-toggle">
+        <input type="checkbox" id="scene-autosave-checkbox" />
+        Autosave ao trocar de cena
+      </label>
+
+      <div id="scene-list" class="scene-list">
+        <div class="scene-list-empty">Nenhuma cena carregada ainda.</div>
+      </div>
+    `;
+    sidebar.appendChild(section);
+    this._container = section;
+
+    document.getElementById("scene-btn-new")
+      .addEventListener("click", () => ScenePlugin.Control.newScene());
+
+    document.getElementById("scene-btn-save")
+      .addEventListener("click", () => ScenePlugin.Control.saveCurrentScene());
+
+    document.getElementById("scene-btn-save-as")
+      .addEventListener("click", () => this.promptSaveAs());
+
+    document.getElementById("scene-autosave-checkbox")
+      .addEventListener("change", () => ScenePlugin.Control.toggleAutosave());
+  },
+
+  promptSaveAs() {
+    const name = prompt("Nome da cena:");
+    if (name && name.trim()) {
+      ScenePlugin.Control.saveAs(name.trim());
+    }
+  },
+
+  refreshHeader() {
+    const el = document.getElementById("scene-current-name");
+    if (!el) return;
+    const current = ScenePlugin.Model.getCurrentScene();
+    el.textContent = current.name ? ("Cena atual: " + current.name) : "(cena sem nome)";
+  },
+
+  refreshAutosaveToggle() {
+    const checkbox = document.getElementById("scene-autosave-checkbox");
+    if (!checkbox) return;
+    checkbox.checked = ScenePlugin.Model.getAutosaveEnabled();
+  },
+
+  refreshList() {
+    const listEl = document.getElementById("scene-list");
+    if (!listEl) return;
+
+    ScenePlugin.Model.listScenes(
+      scenes => {
+        if (!scenes || scenes.length === 0) {
+          listEl.innerHTML = '<div class="scene-list-empty">Nenhuma cena salva ainda.</div>';
+          return;
+        }
+
+        listEl.innerHTML = "";
+        scenes.forEach(scene => {
+          const item = document.createElement("div");
+          item.className = "scene-list-item";
+
+          const dateStr = new Date(scene.updatedAt).toLocaleString("pt-BR");
+
+          item.innerHTML = `
+            <div class="scene-list-item-info">
+              <span class="scene-list-item-name">${scene.name}</span>
+              <span class="scene-list-item-date">${dateStr}</span>
+            </div>
+            <div class="scene-list-item-actions">
+              <button class="scene-load-btn" title="Carregar">Carregar</button>
+              <button class="scene-delete-btn" title="Excluir">Excluir</button>
+            </div>
+          `;
+
+          item.querySelector(".scene-load-btn").addEventListener("click", () => {
+            ScenePlugin.Control.loadScene(scene.id, scene.name);
+          });
+          item.querySelector(".scene-delete-btn").addEventListener("click", () => {
+            ScenePlugin.Control.deleteScene(scene.id, scene.name);
+          });
+
+          listEl.appendChild(item);
+        });
+      },
+      err => {
+        listEl.innerHTML = '<div class="scene-list-empty">Erro ao listar cenas.</div>';
+        console.error("[ScenePlugin.UI] Erro ao listar cenas:", err);
+      }
+    );
+  }
+};
+
+/* ----------------------------------------------------------
+   BOOT
+   ---------------------------------------------------------- */
+ScenePlugin.boot = function () {
+  function waitForDeps(cb) {
+    const t = setInterval(() => {
+      const ready =
+        document.getElementById("sidebar") &&
+        window.VTTMode &&
+        window.TokenPlugin && TokenPlugin.Model &&
+        window.LightPlugin && LightPlugin.Model &&
+        window.AudioPlugin && AudioPlugin.Model &&
+        window.BibliotecaPlugin && BibliotecaPlugin.Model; // necessário para restaurar mapas
+
+      if (ready) {
+        clearInterval(t);
+        cb();
+      }
+    }, 100);
+  }
+
+  waitForDeps(() => {
+    ScenePlugin.Model.init();
+    ScenePlugin.UI.init();
+    console.log("[ScenePlugin] boot completo.");
+  });
+};
+
+ScenePlugin.boot();
+</script>
+
+<style>
+  #scene-section .sidebar-section-title {
+    margin-bottom: 6px;
+  }
+  .scene-current-name {
+    font-size: 0.85em;
+    opacity: 0.8;
+    margin-bottom: 8px;
+  }
+  .scene-buttons-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .scene-buttons-row button {
+    flex: 1;
+  }
+  .scene-autosave-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85em;
+    margin: 8px 0;
+    cursor: pointer;
+  }
+  .scene-list {
+    max-height: 200px;
+    overflow-y: auto;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    padding-top: 6px;
+  }
+  .scene-list-empty {
+    font-size: 0.8em;
+    opacity: 0.6;
+    padding: 6px 0;
+  }
+  .scene-list-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 0.85em;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  .scene-list-item-info {
+    display: flex;
+    flex-direction: column;
+  }
+  .scene-list-item-name {
+    font-weight: bold;
+  }
+  .scene-list-item-date {
+    font-size: 0.75em;
+    opacity: 0.6;
+  }
+  .scene-list-item-actions button {
+    font-size: 0.75em;
+    padding: 2px 6px;
+    margin-left: 4px;
+  }
+</style>

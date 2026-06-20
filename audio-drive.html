@@ -1,10 +1,15 @@
 <script>
-// ============================================================
-// MINARDI VTT — AudioPlugin
-// audio-drive.html — Comunicação com o Google Drive
-// ============================================================
+/* ============================================================
+   AudioPlugin.Drive — VERSÃO MIGRADA (sem base64)
+   ------------------------------------------------------------
+   Mudança principal: scanAudioLibrary() agora retorna apenas
+   {id, name} por track. A URL pública é montada aqui no client
+   com AudioPlugin.Drive.buildUrl(fileId), nunca mais com
+   "data:audio/...;base64,...".
 
-console.log("audio-drive carregado");
+   Pré-requisito: os arquivos no Drive precisam estar com
+   permissão "Qualquer pessoa com o link pode visualizar".
+   ============================================================ */
 
 window.AudioPlugin = window.AudioPlugin || {};
 
@@ -12,67 +17,75 @@ AudioPlugin.Drive = {
 
   _scanning: false,
 
-  init() {
-    console.log("AudioPlugin.Drive INIT");
+  /**
+   * Monta a URL pública de streaming a partir do fileId.
+   * Esta é a função-chave da migração: antes a track já vinha
+   * com track.url pronto (base64). Agora track.id vem do servidor
+   * e a URL é construída aqui, sob demanda.
+   */
+  buildUrl(fileId) {
+    if (!fileId) return null;
+    return "https://drive.google.com/uc?export=view&id=" + fileId;
   },
-
-  // ============================================================
-  // Garante estrutura de pastas e escaneia a biblioteca.
-  // Chamado pelo botão "Conectar" na UI ou no boot se já houver folderId salvo.
-  // ============================================================
 
   connect(onSuccess, onError) {
-    if (this._scanning) return;
-    this._scanning = true;
-    // Etapa 0: se já temos a pasta Audio/ identificada via biblioteca raiz,
-    // podemos pular o ensureAudioStructure e ir direto para scanLibrary.
-    // Isso evita criar estrutura de pastas duplicada.
-    var audioAssets = window.BibliotecaPlugin
-      ? BibliotecaPlugin.Model.getAssetsPorTipo("audio")
-      : [];
-  },  
-
-scanLibrary(onSuccess, onError) {
-    const folderId = AudioPlugin.Model.audioFolderId;
-    if (!folderId) {
-      AudioPlugin.UI.setStatus("Nenhuma pasta configurada.");
-      this._scanning = false;
-      return;
-    }
-
-    AudioPlugin.UI.setStatus("Escaneando biblioteca...");
-
-    // Usa scanAudioLibraryMetadata — retorna apenas metadados, sem base64.
-    // O áudio é carregado sob demanda ao clicar em uma faixa.
     google.script.run
-      .withSuccessHandler(library => {
-        this._scanning = false;
-        if (library.error) {
-          AudioPlugin.UI.setStatus("Erro ao escanear: " + library.error);
-          if (onError) onError(library.error);
+      .withSuccessHandler(result => {
+        if (result && result.error) {
+          console.error("[AudioPlugin.Drive] Erro ao conectar:", result.error);
+          if (onError) onError(result.error);
           return;
         }
-        AudioPlugin.Model.setLibrary(library);
-        AudioPlugin.UI.renderLibrary();
-        AudioPlugin.UI.setStatus("✅ Biblioteca pronta.");
-        if (onSuccess) onSuccess(library);
+        AudioPlugin.Model.setAudioFolderId(result.audioFolderId);
+        console.log("[AudioPlugin.Drive] Conectado. audioFolderId:", result.audioFolderId);
+        if (onSuccess) onSuccess(result.audioFolderId);
       })
       .withFailureHandler(err => {
-        this._scanning = false;
-        AudioPlugin.UI.setStatus("Falha: " + err.message);
+        console.error("[AudioPlugin.Drive] Falha RPC ensureAudioStructure:", err.message);
         if (onError) onError(err.message);
       })
-      .scanAudioLibraryMetadata(folderId);
+      .ensureAudioStructure();
   },
 
-  // ============================================================
-  // Re-escaneia sem re-criar estrutura. Botão "Sincronizar".
-  // ============================================================
+  scanLibrary(onSuccess, onError) {
+    const folderId = AudioPlugin.Model.getAudioFolderId();
+    if (!folderId) {
+      if (onError) onError("audioFolderId não definido. Conecte o Drive primeiro.");
+      return;
+    }
+    if (this._scanning) {
+      console.warn("[AudioPlugin.Drive] Scan já em andamento, ignorando chamada duplicada.");
+      return;
+    }
+    this._scanning = true;
+
+    google.script.run
+      .withSuccessHandler(result => {
+        AudioPlugin.Drive._scanning = false;
+        if (result && result.error) {
+          console.error("[AudioPlugin.Drive] Erro ao escanear:", result.error);
+          if (onError) onError(result.error);
+          return;
+        }
+        // result = { music: {...}, ambience: {...}, effects: {...} }
+        // cada track = { id, name } — SEM dataUrl.
+        AudioPlugin.Model.setLibrary(result);
+        console.log("[AudioPlugin.Drive] Biblioteca carregada (modo URL direta).");
+        if (onSuccess) onSuccess(result);
+      })
+      .withFailureHandler(err => {
+        AudioPlugin.Drive._scanning = false;
+        console.error("[AudioPlugin.Drive] Falha RPC scanAudioLibrary:", err.message);
+        if (onError) onError(err.message);
+      })
+      .scanAudioLibrary(folderId);
+  },
 
   rescanLibrary() {
-    this._scanning = false;
-    this.scanLibrary();
+    this.scanLibrary(
+      () => console.log("[AudioPlugin.Drive] Rescan completo."),
+      err => console.error("[AudioPlugin.Drive] Rescan falhou:", err)
+    );
   }
-
 };
 </script>

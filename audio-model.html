@@ -12,7 +12,7 @@ AudioPlugin.Model = {
 
   // ---- Biblioteca escaneada do Drive ----
   library: {
-    music:    {},   // { "Combat": [{id, name, url}], ... }
+    music:    {},   // { "Combat": [{id, name}], ... }
     ambience: {},
     effects:  {}
   },
@@ -44,7 +44,7 @@ AudioPlugin.Model = {
   },
 
   // ---- Favoritos de efeitos ----
-  favoriteEffects: [],   // array de { category, trackName, url }
+  favoriteEffects: [],   // array de { category, name, id }
 
   // ============================================================
 
@@ -111,7 +111,7 @@ AudioPlugin.Model = {
     const key = category + "::" + track.name;
     const idx = this.favoriteEffects.findIndex(f => f.category + "::" + f.name === key);
     if (idx >= 0) this.favoriteEffects.splice(idx, 1);
-    else this.favoriteEffects.push({ category, name: track.name, url: track.url });
+    else this.favoriteEffects.push({ category, name: track.name, url: track.id });
     this._saveToStorage();
   },
 

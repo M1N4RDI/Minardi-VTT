@@ -1,196 +1,182 @@
 <script>
-// ============================================================
-// MINARDI VTT — AudioPlugin
-// audio-player.html — Motor de reprodução
-// ============================================================
+/* ============================================================
+   AudioPlugin.Player — VERSÃO MIGRADA (sem base64)
+   ------------------------------------------------------------
+   Diferença chave: as funções de play agora recebem o objeto
+   track {id, name} (ou apenas o id) em vez de uma url já pronta.
+   A resolução da URL acontece aqui, via AudioPlugin.Drive.buildUrl().
 
-console.log("audio-player carregado");
+   Isso mantém o resto do plugin (Control, UI) quase inalterado:
+   eles continuam passando "a track", só que agora ela não tem
+   mais o peso de uma string base64 de vários MB.
+   ============================================================ */
 
 window.AudioPlugin = window.AudioPlugin || {};
 
 AudioPlugin.Player = {
 
-  _musicEl:     null,
-  _fadeEl:      null,
-  _ambienceEls: {},
+  _musicEl: null,
+  _ambienceEls: {},   // { categoryName: <audio> }
   _effectsPool: [],
-  _fadeDuration: 3000,
+  _crossfadeTimer: null,
 
   init() {
-    console.log("AudioPlugin.Player INIT");
     this._musicEl = new Audio();
-    this._fadeEl  = new Audio();
-    this._musicEl.loop = false;
-    this._fadeEl.loop  = false;
+    this._musicEl.preload = "auto";
+    this._attachTimeUpdate();
 
-    this._attachTimeUpdate(this._musicEl);
+    for (let i = 0; i < 8; i++) {
+      this._effectsPool.push(new Audio());
+    }
 
-    for (var i = 0; i < 8; i++) this._effectsPool.push(new Audio());
-
-    this.applyVolumes();
+    console.log("[AudioPlugin.Player] init OK (modo URL direta)");
   },
 
-  _attachTimeUpdate(el) {
-    el.addEventListener("timeupdate", () => {
-      if (el !== this._musicEl) return;
-      AudioPlugin.UI.updateProgressBar();
-      const dur = el.duration;
-      if (!dur || isNaN(dur)) return;
-      if (!el._fadingOut && dur - el.currentTime <= this._fadeDuration / 1000) {
-        el._fadingOut = true;
-        AudioPlugin.Control.advancePlaylist();
-      }
-    });
+  /**
+   * Resolve fileId -> URL pública. Aceita tanto um objeto track
+   * {id, name} quanto uma string de fileId direto.
+   */
+  _resolveUrl(trackOrId) {
+    const fileId = (typeof trackOrId === "string") ? trackOrId : trackOrId.id;
+    return AudioPlugin.Drive.buildUrl(fileId);
   },
 
-// Carrega um arquivo de áudio sob demanda pelo fileId do Drive,
-  // depois executa o callback com a dataUrl.
-  _loadAudioById(fileId, cb) {
-    // Cache simples em memória para evitar re-fetch da mesma faixa
-    if (!this._audioCache) this._audioCache = {};
-    if (this._audioCache[fileId]) { cb(this._audioCache[fileId]); return; }
+  playMusic(track, fade) {
+    const url = this._resolveUrl(track);
+    if (!url) {
+      console.error("[AudioPlugin.Player] track sem id válido:", track);
+      return;
+    }
 
-    google.script.run
-      .withSuccessHandler(result => {
-        if (result && result.dataUrl) {
-          this._audioCache[fileId] = result.dataUrl;
-          cb(result.dataUrl);
-        } else {
-          console.warn("AudioPlugin.Player: falha ao carregar fileId", fileId, result);
-        }
-      })
-      .withFailureHandler(err => {
-        console.warn("AudioPlugin.Player: RPC falhou", err.message);
-      })
-      .getFileAsDataUrl(fileId);
-  },
-
-  playMusic(url, fade) {
-    if (!url) return;
-    if (fade && this._musicEl.src && !this._musicEl.paused) {
+    if (fade && !this._musicEl.paused) {
       this._crossfade(url);
     } else {
-      this._musicEl._fadingOut = false;
-      this._musicEl.src    = url;
-      this._musicEl.volume = this._effectiveVolume("music");
-      this._musicEl.play().catch(e => console.warn("AudioPlayer: erro ao tocar música.", e));
+      this._musicEl.src = url;
+      this._musicEl.currentTime = 0;
+      this._musicEl.play().catch(e => console.warn("[Player] autoplay bloqueado:", e));
     }
+  },
+
+  _crossfade(newUrl) {
+    const oldEl = this._musicEl;
+    const newEl = new Audio(newUrl);
+    const steps = 30;
+    const stepTime = 100; // 30 * 100ms = 3s
+
+    newEl.volume = 0;
+    newEl.play().catch(e => console.warn("[Player] crossfade play bloqueado:", e));
+
+    let i = 0;
+    if (this._crossfadeTimer) clearInterval(this._crossfadeTimer);
+
+    this._crossfadeTimer = setInterval(() => {
+      i++;
+      const ratio = i / steps;
+      oldEl.volume = Math.max(0, 1 - ratio) * AudioPlugin.Model.getEffectiveVolume("music");
+      newEl.volume = Math.min(1, ratio) * AudioPlugin.Model.getEffectiveVolume("music");
+
+      if (i >= steps) {
+        clearInterval(this._crossfadeTimer);
+        oldEl.pause();
+        this._musicEl = newEl;
+        this._attachTimeUpdate();
+      }
+    }, stepTime);
   },
 
   pauseMusic() {
-    if (this._musicEl.paused) {
-      this._musicEl.play().catch(() => {});
-    } else {
-      this._musicEl.pause();
-    }
+    if (this._musicEl) this._musicEl.pause();
   },
 
   stopMusic() {
-    const el = this._musicEl;
-    if (!el.src || el.paused) {
-      el.src = ""; el._fadingOut = false;
-      AudioPlugin.Model.currentMusic = null;
-      AudioPlugin.UI.updateNowPlaying();
-      AudioPlugin.UI.updateProgressBar();
-      return;
+    if (this._musicEl) {
+      this._musicEl.pause();
+      this._musicEl.currentTime = 0;
     }
-    const steps = 20, interval = this._fadeDuration / steps;
-    const startVol = el.volume;
-    let step = 0;
-    const timer = setInterval(() => {
-      step++;
-      el.volume = Math.max(0, startVol * (1 - step / steps));
-      if (step >= steps) {
-        clearInterval(timer);
-        el.pause(); el.src = ""; el._fadingOut = false;
-        AudioPlugin.Model.currentMusic = null;
-        AudioPlugin.UI.updateNowPlaying();
-        AudioPlugin.UI.updateProgressBar();
-      }
-    }, interval);
   },
 
   seekTo(ratio) {
-    const el = this._musicEl;
-    if (!el || !el.duration || isNaN(el.duration)) return;
-    el.currentTime = el.duration * ratio;
+    if (this._musicEl && this._musicEl.duration) {
+      this._musicEl.currentTime = ratio * this._musicEl.duration;
+    }
   },
 
-  getCurrentTime()  { return this._musicEl ? this._musicEl.currentTime : 0; },
-  getDuration()     { return this._musicEl ? (this._musicEl.duration || 0) : 0; },
-  isPaused()        { return this._musicEl ? this._musicEl.paused : true; },
-
-  _crossfade(newUrl) {
-    const steps = 30, interval = this._fadeDuration / steps;
-    const outEl = this._musicEl, inEl = this._fadeEl;
-    inEl._fadingOut = false;
-    inEl.src = newUrl; inEl.volume = 0;
-    inEl.play().catch(() => {});
-    let step = 0;
-    const timer = setInterval(() => {
-      step++;
-      const p = step / steps;
-      outEl.volume = Math.max(0, this._effectiveVolume("music") * (1 - p));
-      inEl.volume  = Math.min(this._effectiveVolume("music"), this._effectiveVolume("music") * p);
-      if (step >= steps) {
-        clearInterval(timer);
-        outEl.pause(); outEl.src = ""; outEl._fadingOut = false;
-        this._musicEl = inEl; this._fadeEl = outEl;
-        this._musicEl._fadingOut = false;
-        this._attachTimeUpdate(this._musicEl);
-      }
-    }, interval);
-  },
-
-  startAmbience(category, url, volume) {
-    if (this._ambienceEls[category]) {
-      this._ambienceEls[category].volume = this._effectiveVolume("ambience", volume);
+  startAmbience(category, track, volume) {
+    const url = this._resolveUrl(track);
+    if (!url) {
+      console.error("[AudioPlugin.Player] ambience sem id válido:", track);
       return;
     }
-    const el = new Audio();
-    el.src = url; el.loop = true;
-    el.volume = this._effectiveVolume("ambience", volume);
-    el.play().catch(e => console.warn("AudioPlayer: erro ao tocar ambiência.", e));
-    this._ambienceEls[category] = el;
+
+    let el = this._ambienceEls[category];
+    if (!el) {
+      el = new Audio();
+      el.loop = true;
+      this._ambienceEls[category] = el;
+    }
+    el.src = url;
+    el.volume = volume != null ? volume : 1;
+    el.play().catch(e => console.warn("[Player] ambience autoplay bloqueado:", e));
   },
 
   stopAmbience(category) {
     const el = this._ambienceEls[category];
-    if (!el) return;
-    el.pause(); el.src = "";
-    delete this._ambienceEls[category];
+    if (el) {
+      el.pause();
+      delete this._ambienceEls[category];
+    }
   },
 
   stopAllAmbiences() {
-    Object.keys(this._ambienceEls).forEach(cat => this.stopAmbience(cat));
+    for (const cat in this._ambienceEls) {
+      this._ambienceEls[cat].pause();
+    }
+    this._ambienceEls = {};
   },
 
-  setAmbienceVolume(category, volume) {
-    const el = this._ambienceEls[category];
-    if (el) el.volume = this._effectiveVolume("ambience", volume);
-  },
+  playEffect(track) {
+    const url = this._resolveUrl(track);
+    if (!url) {
+      console.error("[AudioPlugin.Player] efeito sem id válido:", track);
+      return;
+    }
 
-  playEffect(url) {
-    let el = this._effectsPool.find(e => e.paused || e.ended);
-    if (!el) { el = new Audio(); this._effectsPool.push(el); }
-    el.src = url; el.volume = this._effectiveVolume("effects");
-    el.play().catch(e => console.warn("AudioPlayer: erro ao tocar efeito.", e));
-  },
-
-  _effectiveVolume(channel, customVolume) {
-    const master = AudioPlugin.Model.volumes.master / 100;
-    const chan   = (customVolume !== undefined ? customVolume : AudioPlugin.Model.volumes[channel]) / 100;
-    return Math.min(1, master * chan);
+    const free = this._effectsPool.find(el => el.paused);
+    const el = free || this._effectsPool[0];
+    el.src = url;
+    el.currentTime = 0;
+    el.play().catch(e => console.warn("[Player] efeito autoplay bloqueado:", e));
   },
 
   applyVolumes() {
-    if (this._musicEl) this._musicEl.volume = this._effectiveVolume("music");
-    Object.keys(this._ambienceEls).forEach(cat => {
-      const m = AudioPlugin.Model.activeAmbiences[cat];
-      this._ambienceEls[cat].volume = this._effectiveVolume("ambience", m ? m.volume : AudioPlugin.Model.volumes.ambience);
-    });
+    if (this._musicEl) {
+      this._musicEl.volume = AudioPlugin.Model.getEffectiveVolume("music");
+    }
+    for (const cat in this._ambienceEls) {
+      this._ambienceEls[cat].volume = AudioPlugin.Model.getEffectiveVolume("ambience");
+    }
   },
 
-  setFadeDuration(ms) { this._fadeDuration = ms; }
+  isPaused() {
+    return this._musicEl ? this._musicEl.paused : true;
+  },
+
+  getCurrentTime() {
+    return this._musicEl ? this._musicEl.currentTime : 0;
+  },
+
+  getDuration() {
+    return this._musicEl ? (this._musicEl.duration || 0) : 0;
+  },
+
+  _attachTimeUpdate() {
+    this._musicEl.ontimeupdate = () => {
+      const d = this._musicEl.duration;
+      const t = this._musicEl.currentTime;
+      if (d && (d - t) <= 3) {
+        AudioPlugin.Control.advancePlaylist();
+      }
+    };
+  }
 };
 </script>

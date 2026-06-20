@@ -157,8 +157,6 @@ BibliotecaPlugin.UI = {
 // ============================================================
 // Integração com javascript.html — substituição de carregarMapaPorId
 // Carrega um mapa pelo ID do Drive (chama getFileAsDataUrl no servidor)
-// O player base64 existente continua funcionando nesta etapa.
-// ============================================================
 function carregarMapaPorId(asset) {
   var lib = document.getElementById("drive-library");
   if (lib) lib.innerHTML = "<div style='color:#aaa;font-size:0.75em;'>Carregando " + asset.nome + "...</div>";
@@ -170,11 +168,25 @@ function carregarMapaPorId(asset) {
         BibliotecaPlugin.UI._popularMapas(); // restaura lista
         return;
       }
+
+      var tipo = asset.mimeType.indexOf("video/") === 0 ? "video" : "image";
+
+      // ---- LINHA NOVA: registra referência leve do mapa selecionado ----
+      // Usado por ScenePlugin.Model._captureMap() para saber o que
+      // salvar sem depender do nome do arquivo (instável) ou de
+      // variáveis que não existiam antes desta integração.
+      window._currentMapRef = {
+        driveFileId: asset.id,
+        name: asset.nome,
+        type: tipo
+      };
+      // --------------------------------------------------------------------
+
       // Reutiliza selectMap existente em javascript.html
       selectMap({
         name:    asset.nome,
         dataUrl: resultado.dataUrl,
-        type:    asset.mimeType.indexOf("video/") === 0 ? "video" : "image"
+        type:    tipo
       });
       BibliotecaPlugin.UI._popularMapas(); // restaura lista após seleção
     })

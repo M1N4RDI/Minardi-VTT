@@ -1,0 +1,171 @@
+<script>
+/* ============================================================
+   ScenePlugin.Control
+   ------------------------------------------------------------
+   Lógica de negócio: nova cena, salvar, salvar como, carregar,
+   excluir, alternar autosave.
+
+   Autosave silencioso: NÃO é um timer periódico. É disparado
+   pontualmente em dois momentos: antes de criar uma cena nova
+   e antes de carregar outra cena — sempre que há uma cena ativa
+   (com nome definido) e a flag estiver ligada.
+   ============================================================ */
+
+window.ScenePlugin = window.ScenePlugin || {};
+
+ScenePlugin.Control = {
+
+  _busy: false,
+
+  /**
+   * Autosave silencioso da cena atual, se aplicável.
+   * Não mostra UI, não pede confirmação, não bloqueia o fluxo
+   * por mais que o tempo do RPC.
+   */
+  _autosaveIfNeeded(cb) {
+    const current = ScenePlugin.Model.getCurrentScene();
+    const shouldAutosave = ScenePlugin.Model.getAutosaveEnabled() && current.name;
+
+    if (!shouldAutosave) { cb(); return; }
+
+    const sceneData = ScenePlugin.Model.capture();
+    sceneData.name = current.name;
+
+    ScenePlugin.Model.saveToDrive(
+      current.name,
+      sceneData,
+      () => {
+        console.log("[ScenePlugin] Autosave silencioso concluído:", current.name);
+        cb();
+      },
+      err => {
+        console.warn("[ScenePlugin] Autosave falhou (seguindo mesmo assim):", err);
+        cb(); // não bloqueia o fluxo principal por falha de autosave
+      }
+    );
+  },
+
+  newScene() {
+    if (this._busy) return;
+    this._busy = true;
+
+    this._autosaveIfNeeded(() => {
+      ScenePlugin.Model.clearCurrentScene();
+      ScenePlugin.Model.setCurrentScene(null, null);
+      ScenePlugin.UI.refreshHeader();
+      this._busy = false;
+      console.log("[ScenePlugin] Nova cena iniciada (em branco).");
+    });
+  },
+
+  saveCurrentScene() {
+    const current = ScenePlugin.Model.getCurrentScene();
+    if (!current.name) {
+      // ainda não tem nome — pede via Salvar Como
+      ScenePlugin.UI.promptSaveAs();
+      return;
+    }
+    this._saveAs(current.name, current.id);
+  },
+
+  saveAs(name) {
+    if (!name || !name.trim()) {
+      console.warn("[ScenePlugin] Nome de cena vazio, ignorado.");
+      return;
+    }
+    this._saveAs(name.trim(), null);
+  },
+
+  _saveAs(name, knownId) {
+    if (this._busy) return;
+    this._busy = true;
+
+    const sceneData = ScenePlugin.Model.capture();
+    sceneData.name = name;
+
+    ScenePlugin.Model.saveToDrive(
+      name,
+      sceneData,
+      result => {
+        ScenePlugin.Model.setCurrentScene(result.id, result.name);
+        ScenePlugin.UI.refreshHeader();
+        ScenePlugin.UI.refreshList();
+        this._busy = false;
+        console.log("[ScenePlugin] Cena salva:", result.name);
+      },
+      err => {
+        console.error("[ScenePlugin] Erro ao salvar cena:", err);
+        this._busy = false;
+        alert("Não foi possível salvar a cena: " + err);
+      }
+    );
+  },
+
+  loadScene(sceneFileId, sceneName) {
+    if (this._busy) return;
+    this._busy = true;
+
+    this._autosaveIfNeeded(() => {
+      ScenePlugin.Model.loadFromDrive(
+        sceneFileId,
+        sceneData => {
+          ScenePlugin.Model.restore(sceneData, () => {
+            ScenePlugin.Model.setCurrentScene(sceneFileId, sceneName);
+            ScenePlugin.UI.refreshHeader();
+            this._busy = false;
+          });
+        },
+        err => {
+          console.error("[ScenePlugin] Erro ao carregar cena:", err);
+          this._busy = false;
+          alert("Não foi possível carregar a cena: " + err);
+        }
+      );
+    });
+  },
+
+  deleteScene(sceneFileId, sceneName) {
+    if (this._busy) return;
+    const confirmed = confirm('Excluir a cena "' + sceneName + '"? Esta ação não pode ser desfeita facilmente (vai para a lixeira do Drive).');
+    if (!confirmed) return;
+
+    this._busy = true;
+    ScenePlugin.Model.deleteFromDrive(
+      sceneFileId,
+      () => {
+        const current = ScenePlugin.Model.getCurrentScene();
+        if (current.id === sceneFileId) {
+          ScenePlugin.Model.setCurrentScene(null, null);
+          ScenePlugin.UI.refreshHeader();
+        }
+        ScenePlugin.UI.refreshList();
+        this._busy = false;
+      },
+      err => {
+        console.error("[ScenePlugin] Erro ao excluir cena:", err);
+        this._busy = false;
+        alert("Não foi possível excluir a cena: " + err);
+      }
+    );
+  },
+
+  toggleAutosave() {
+    const newValue = !ScenePlugin.Model.getAutosaveEnabled();
+    ScenePlugin.Model.setAutosaveEnabled(newValue);
+    ScenePlugin.UI.refreshAutosaveToggle();
+    console.log("[ScenePlugin] Autosave agora:", newValue ? "LIGADO" : "DESLIGADO");
+  },
+
+  connectAndRefresh() {
+    ScenePlugin.Model.ensureFolder(
+      () => {
+        ScenePlugin.UI.refreshList();
+      },
+      err => {
+        console.error("[ScenePlugin] Erro ao conectar pasta de cenas:", err);
+        alert("Não foi possível conectar a pasta de cenas: " + err);
+      }
+    );
+  }
+};
+</script>

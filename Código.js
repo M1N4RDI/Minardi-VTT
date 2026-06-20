@@ -141,54 +141,58 @@ function ensureAudioStructure() {
  */
 function scanAudioLibrary(audioFolderId) {
   try {
-    var audioFolder = DriveApp.getFolderById(audioFolderId);
-    var library = { music: {}, ambience: {}, effects: {} };
+    var audioRoot = DriveApp.getFolderById(audioFolderId);
 
-    var typeMap = {
-      "music":    "Music",
-      "ambience": "Ambience",
-      "effects":  "Effects"
+    var library = {
+      music: {},
+      ambience: {},
+      effects: {}
     };
 
-    Object.keys(typeMap).forEach(function(key) {
-      var typeName = typeMap[key];
-      var typeFolders = audioFolder.getFoldersByName(typeName);
-      if (!typeFolders.hasNext()) return;
+    var typeFolders = {
+      music: "Music",
+      ambience: "Ambience",
+      effects: "Effects"
+    };
 
-      var typeFolder = typeFolders.next();
+    for (var type in typeFolders) {
+      var typeFolderIter = audioRoot.getFoldersByName(typeFolders[type]);
+
+      if (!typeFolderIter.hasNext()) continue;
+
+      var typeFolder = typeFolderIter.next();
       var subFolders = typeFolder.getFolders();
 
       while (subFolders.hasNext()) {
-        var sub = subFolders.next();
-        var catName = sub.getName();
+        var subFolder = subFolders.next();
+        var categoryName = subFolder.getName();
+
         var tracks = [];
 
-        var files = sub.getFiles();
+        var files = subFolder.getFiles();
+
         while (files.hasNext()) {
           var file = files.next();
           var mime = file.getMimeType();
-          if (!mime.includes("audio/")) continue;
 
-          var bytes  = file.getBlob().getBytes();
-          var base64 = Utilities.base64Encode(bytes);
-          var dataUrl = "data:" + mime + ";base64," + base64;
+          if (mime.indexOf("audio") === -1) continue;
 
           tracks.push({
-            id:   file.getId(),
+            id: file.getId(),
             name: file.getName().replace(/\.[^.]+$/, ""),
-            url:  dataUrl
+            mimeType: mime
           });
         }
 
         if (tracks.length > 0) {
-          library[key][catName] = tracks;
+          library[type][categoryName] = tracks;
         }
       }
-    });
+    }
 
     return library;
 
-  } catch(e) {
+  } catch (e) {
     return { error: e.toString() };
   }
 }
@@ -494,4 +498,124 @@ function getLightingState() {
     var v = PropertiesService.getScriptProperties().getProperty('lighting_state');
     return v || null;
   } catch(e) { return { error: e.toString() }; }
+}
+
+/* --------------------------------------------------------------------
+   SCENES — novas funções RPC para o ScenePlugin
+   Seguem exatamente o padrão de ensureAudioStructure / scanAudioLibrary.
+   -------------------------------------------------------------------- */
+
+/**
+ * Garante que a pasta Minardi VTT/Scenes existe. Cria se necessário.
+ * Retorna { sceneFolderId } ou { error }.
+ */
+function ensureSceneFolder() {
+  try {
+    var root = _getOrCreateFolder(DriveApp.getRootFolder(), "Minardi VTT");
+    var scenes = _getOrCreateFolder(root, "Scenes");
+    return { sceneFolderId: scenes.getId() };
+  } catch (e) {
+    return { error: e.toString() };
+  }
+}
+
+/**
+ * Helper interno (pode já existir em Código.js por causa do Audio —
+ * se já existir, NÃO duplicar, apenas reutilizar).
+ */
+function _getOrCreateFolder(parent, name) {
+  var it = parent.getFoldersByName(name);
+  if (it.hasNext()) return it.next();
+  return parent.createFolder(name);
+}
+
+/**
+ * Lista as cenas salvas (arquivos .json) na pasta de cenas.
+ * Retorna [{ id, name, updatedAt }] ou { error }.
+ * NÃO lê o conteúdo dos arquivos — só metadados, então é rápido
+ * mesmo com muitas cenas salvas.
+ */
+function listScenes(sceneFolderId) {
+  try {
+    var folder = DriveApp.getFolderById(sceneFolderId);
+    var files = folder.getFilesByType(MimeType.PLAIN_TEXT);
+    // Arquivos .json no Drive costumam ser detectados como PLAIN_TEXT
+    // ou application/json dependendo de como foram criados.
+    // Por segurança, iteramos todos os arquivos e filtramos por extensão.
+    var allFiles = folder.getFiles();
+    var result = [];
+
+    while (allFiles.hasNext()) {
+      var f = allFiles.next();
+      if (f.getName().toLowerCase().indexOf(".json") === -1) continue;
+
+      result.push({
+        id: f.getId(),
+        name: f.getName().replace(/\.json$/i, ""),
+        updatedAt: f.getLastUpdated().getTime()
+      });
+    }
+
+    // mais recentes primeiro
+    result.sort(function (a, b) { return b.updatedAt - a.updatedAt; });
+
+    return result;
+  } catch (e) {
+    return { error: e.toString() };
+  }
+}
+
+/**
+ * Salva (cria ou sobrescreve) uma cena como JSON puro.
+ * sceneJsonString: string já serializada (JSON.stringify feito no client).
+ * Retorna { id, name } ou { error }.
+ */
+function saveScene(sceneFolderId, sceneName, sceneJsonString) {
+  try {
+    var folder = DriveApp.getFolderById(sceneFolderId);
+    var fileName = sceneName + ".json";
+
+    // procura arquivo existente com esse nome para sobrescrever
+    var existing = folder.getFilesByName(fileName);
+    if (existing.hasNext()) {
+      var file = existing.next();
+      file.setContent(sceneJsonString);
+      return { id: file.getId(), name: sceneName };
+    }
+
+    var newFile = folder.createFile(fileName, sceneJsonString, MimeType.PLAIN_TEXT);
+    return { id: newFile.getId(), name: sceneName };
+
+  } catch (e) {
+    return { error: e.toString() };
+  }
+}
+
+/**
+ * Carrega o conteúdo de uma cena pelo fileId.
+ * Retorna { content: "...json string..." } ou { error }.
+ * O parse (JSON.parse) é feito no client.
+ */
+function loadScene(sceneFileId) {
+  try {
+    var file = DriveApp.getFileById(sceneFileId);
+    var content = file.getBlob().getDataAsString();
+    return { content: content };
+  } catch (e) {
+    return { error: e.toString() };
+  }
+}
+
+/**
+ * Move uma cena para a lixeira do Drive.
+ * Retorna { success: true } ou { error }.
+ */
+function deleteScene(sceneFileId) {
+  try {
+    var file = DriveApp.getFileById(sceneFileId);
+    file.setTrashed(true);
+    return { success: true };
+  } catch (e) {
+    return { error: e.toString() };
+  }
 }
