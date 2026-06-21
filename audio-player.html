@@ -1,14 +1,31 @@
 <script>
 /* ============================================================
-   AudioPlugin.Player — VERSÃO MIGRADA (sem base64)
+   AudioPlugin.Player — VERSÃO CORRIGIDA (compatível com a API
+   real esperada por audio-control.html e audio-ui.html)
    ------------------------------------------------------------
-   Diferença chave: as funções de play agora recebem o objeto
-   track {id, name} (ou apenas o id) em vez de uma url já pronta.
-   A resolução da URL acontece aqui, via AudioPlugin.Drive.buildUrl().
+   audio-control.html já existente chama:
+     - Player.playMusic(dataUrl, fade)       // recebe URL PRONTA
+     - Player._loadAudioById(fileId, cb)      // converte id -> dataUrl
+     - Player.startAmbience(category, url, volume)
+     - Player.playEffect(dataUrl)
+   audio-ui.html já existente chama:
+     - Player.setAmbienceVolume(category, value)
+     - Player.isPaused() / getCurrentTime() / getDuration() / seekTo()
+     - Player.stopMusic() / pauseMusic()
 
-   Isso mantém o resto do plugin (Control, UI) quase inalterado:
-   eles continuam passando "a track", só que agora ela não tem
-   mais o peso de uma string base64 de vários MB.
+   Por isso esta versão NÃO resolve URL pública (uc?export=view) —
+   ela resolve para uma dataUrl base64 via RPC getAudioFileAsDataUrl,
+   chamado uma única vez por arquivo e cacheado em memória
+   (_dataUrlCache) para não repetir o RPC se a mesma faixa for
+   tocada de novo na mesma sessão.
+
+   Isso é uma migração mais conservadora que a "URL pública direta":
+   ainda usa base64, mas SOB DEMANDA (um arquivo por vez, só quando
+   tocado) em vez de escanear a biblioteca inteira de uma vez. Resolve
+   o gargalo original (scanAudioLibrary não trava mais o GAS), mantendo
+   compatibilidade total com o que audio-control.html/audio-ui.html
+   já esperam. Migrar para URL pública de verdade é um passo
+   posterior e mais simples assim que tudo estiver estável de novo.
    ============================================================ */
 
 window.AudioPlugin = window.AudioPlugin || {};
@@ -19,6 +36,7 @@ AudioPlugin.Player = {
   _ambienceEls: {},   // { categoryName: <audio> }
   _effectsPool: [],
   _crossfadeTimer: null,
+  _dataUrlCache: {},  // { fileId: dataUrl } — evita RPC repetido
 
   init() {
     this._musicEl = new Audio();
@@ -29,29 +47,48 @@ AudioPlugin.Player = {
       this._effectsPool.push(new Audio());
     }
 
-    console.log("[AudioPlugin.Player] init OK (modo URL direta)");
+    console.log("[AudioPlugin.Player] init OK (modo id sob demanda)");
   },
 
   /**
-   * Resolve fileId -> URL pública. Aceita tanto um objeto track
-   * {id, name} quanto uma string de fileId direto.
+   * Resolve um fileId do Drive para dataUrl base64, via RPC.
+   * Usado por audio-control.html sempre que uma track só tem
+   * `.id` (sem `.url`). Cacheia o resultado em memória.
    */
-  _resolveUrl(trackOrId) {
-    const fileId = (typeof trackOrId === "string") ? trackOrId : trackOrId.id;
-    return AudioPlugin.Drive.buildUrl(fileId);
+  _loadAudioById(fileId, callback) {
+    if (!fileId) {
+      console.error("[AudioPlugin.Player] _loadAudioById chamado sem fileId.");
+      return;
+    }
+    if (this._dataUrlCache[fileId]) {
+      callback(this._dataUrlCache[fileId]);
+      return;
+    }
+    google.script.run
+      .withSuccessHandler(result => {
+        if (!result || result.error || !result.dataUrl) {
+          console.error("[AudioPlugin.Player] Falha ao carregar áudio:", result && result.error);
+          return;
+        }
+        AudioPlugin.Player._dataUrlCache[fileId] = result.dataUrl;
+        callback(result.dataUrl);
+      })
+      .withFailureHandler(err => {
+        console.error("[AudioPlugin.Player] Falha RPC getAudioFileAsDataUrl:", err.message);
+      })
+      .getAudioFileAsDataUrl(fileId);
   },
 
-  playMusic(track, fade) {
-    const url = this._resolveUrl(track);
-    if (!url) {
-      console.error("[AudioPlugin.Player] track sem id válido:", track);
+  playMusic(dataUrl, fade) {
+    if (!dataUrl) {
+      console.error("[AudioPlugin.Player] playMusic chamado sem dataUrl.");
       return;
     }
 
     if (fade && !this._musicEl.paused) {
-      this._crossfade(url);
+      this._crossfade(dataUrl);
     } else {
-      this._musicEl.src = url;
+      this._musicEl.src = dataUrl;
       this._musicEl.currentTime = 0;
       this._musicEl.play().catch(e => console.warn("[Player] autoplay bloqueado:", e));
     }
@@ -72,8 +109,8 @@ AudioPlugin.Player = {
     this._crossfadeTimer = setInterval(() => {
       i++;
       const ratio = i / steps;
-      oldEl.volume = Math.max(0, 1 - ratio) * AudioPlugin.Model.getEffectiveVolume("music");
-      newEl.volume = Math.min(1, ratio) * AudioPlugin.Model.getEffectiveVolume("music");
+      oldEl.volume = Math.max(0, 1 - ratio) * AudioPlugin.Player._effectiveVolume("music");
+      newEl.volume = Math.min(1, ratio) * AudioPlugin.Player._effectiveVolume("music");
 
       if (i >= steps) {
         clearInterval(this._crossfadeTimer);
@@ -85,7 +122,12 @@ AudioPlugin.Player = {
   },
 
   pauseMusic() {
-    if (this._musicEl) this._musicEl.pause();
+    if (!this._musicEl) return;
+    if (this._musicEl.paused) {
+      this._musicEl.play().catch(e => console.warn("[Player] play bloqueado:", e));
+    } else {
+      this._musicEl.pause();
+    }
   },
 
   stopMusic() {
@@ -101,22 +143,25 @@ AudioPlugin.Player = {
     }
   },
 
-  startAmbience(category, track, volume) {
-    const url = this._resolveUrl(track);
-    if (!url) {
-      console.error("[AudioPlugin.Player] ambience sem id válido:", track);
+  startAmbience(category, dataUrl, volume) {
+    if (!dataUrl) {
+      console.error("[AudioPlugin.Player] startAmbience chamado sem dataUrl:", category);
       return;
     }
-
     let el = this._ambienceEls[category];
     if (!el) {
       el = new Audio();
       el.loop = true;
       this._ambienceEls[category] = el;
     }
-    el.src = url;
-    el.volume = volume != null ? volume : 1;
+    el.src = dataUrl;
+    el.volume = this._scaleVolume(volume != null ? volume : 100);
     el.play().catch(e => console.warn("[Player] ambience autoplay bloqueado:", e));
+  },
+
+  setAmbienceVolume(category, value) {
+    const el = this._ambienceEls[category];
+    if (el) el.volume = this._scaleVolume(value);
   },
 
   stopAmbience(category) {
@@ -134,27 +179,39 @@ AudioPlugin.Player = {
     this._ambienceEls = {};
   },
 
-  playEffect(track) {
-    const url = this._resolveUrl(track);
-    if (!url) {
-      console.error("[AudioPlugin.Player] efeito sem id válido:", track);
+  playEffect(dataUrl) {
+    if (!dataUrl) {
+      console.error("[AudioPlugin.Player] playEffect chamado sem dataUrl.");
       return;
     }
-
     const free = this._effectsPool.find(el => el.paused);
     const el = free || this._effectsPool[0];
-    el.src = url;
+    el.volume = this._scaleVolume(AudioPlugin.Model.volumes.effects);
+    el.src = dataUrl;
     el.currentTime = 0;
     el.play().catch(e => console.warn("[Player] efeito autoplay bloqueado:", e));
   },
 
   applyVolumes() {
     if (this._musicEl) {
-      this._musicEl.volume = AudioPlugin.Model.getEffectiveVolume("music");
+      this._musicEl.volume = this._effectiveVolume("music");
     }
     for (const cat in this._ambienceEls) {
-      this._ambienceEls[cat].volume = AudioPlugin.Model.getEffectiveVolume("ambience");
+      this._ambienceEls[cat].volume = this._effectiveVolume("ambience");
     }
+  },
+
+  /**
+   * master × canal, normalizado de 0-100 para 0-1 (HTMLMediaElement.volume).
+   */
+  _effectiveVolume(channel) {
+    const v = AudioPlugin.Model.volumes;
+    return (v.master / 100) * (v[channel] / 100);
+  },
+
+  _scaleVolume(channelValue0a100) {
+    const v = AudioPlugin.Model.volumes;
+    return (v.master / 100) * (channelValue0a100 / 100);
   },
 
   isPaused() {

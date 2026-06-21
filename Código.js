@@ -130,15 +130,13 @@ function ensureAudioStructure() {
   }
 }
 
-/**
- * Escaneia a pasta Audio/ e retorna a biblioteca completa.
- * Estrutura retornada:
- * {
- *   music:    { "Combat": [{id, name, url}], ... },
- *   ambience: { "Rain":   [{id, name, url}], ... },
- *   effects:  { "Magic":  [{id, name, url}], ... }
- * }
- */
+/* --------------------------------------------------------------------
+   ÁUDIO — scanAudioLibrary (MODIFICADA)
+   Antes: lia cada arquivo com DriveApp e convertia para base64.
+   Agora: retorna apenas {id, name} de cada arquivo. Nenhum getBlob(),
+   nenhum base64Encode(). Muito mais rápido e sem limite de tamanho
+   de resposta do GAS (que existia com bibliotecas grandes em base64).
+   -------------------------------------------------------------------- */
 function scanAudioLibrary(audioFolderId) {
   try {
     var audioRoot = DriveApp.getFolderById(audioFolderId);
@@ -157,30 +155,27 @@ function scanAudioLibrary(audioFolderId) {
 
     for (var type in typeFolders) {
       var typeFolderIter = audioRoot.getFoldersByName(typeFolders[type]);
-
       if (!typeFolderIter.hasNext()) continue;
-
       var typeFolder = typeFolderIter.next();
-      var subFolders = typeFolder.getFolders();
 
+      var subFolders = typeFolder.getFolders();
       while (subFolders.hasNext()) {
         var subFolder = subFolders.next();
         var categoryName = subFolder.getName();
-
         var tracks = [];
 
         var files = subFolder.getFiles();
-
         while (files.hasNext()) {
           var file = files.next();
           var mime = file.getMimeType();
-
+          // filtro simples por mimetype de áudio
           if (mime.indexOf("audio") === -1) continue;
 
           tracks.push({
             id: file.getId(),
-            name: file.getName().replace(/\.[^.]+$/, ""),
-            mimeType: mime
+            name: file.getName()
+            // SEM dataUrl. SEM base64. Carregado sob demanda ao tocar
+            // (ver getAudioFileAsDataUrl abaixo).
           });
         }
 
@@ -192,6 +187,25 @@ function scanAudioLibrary(audioFolderId) {
 
     return library;
 
+  } catch (e) {
+    return { error: e.toString() };
+  }
+}
+
+/* --------------------------------------------------------------------
+   ÁUDIO — getAudioFileAsDataUrl (NOVA)
+   Carrega UM arquivo de áudio pelo fileId e retorna como dataUrl
+   base64. Chamada sob demanda pelo client (AudioPlugin.Player.
+   _loadAudioById) só no momento em que a faixa precisa tocar —
+   nunca durante o scan da biblioteca inteira.
+   -------------------------------------------------------------------- */
+function getAudioFileAsDataUrl(fileId) {
+  try {
+    var file = DriveApp.getFileById(fileId);
+    var blob = file.getBlob();
+    var base64 = Utilities.base64Encode(blob.getBytes());
+    var mimeType = blob.getContentType();
+    return { dataUrl: "data:" + mimeType + ";base64," + base64 };
   } catch (e) {
     return { error: e.toString() };
   }

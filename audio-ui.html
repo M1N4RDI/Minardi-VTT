@@ -458,7 +458,7 @@ AudioPlugin.UI = {
           background:rgba(0,0,0,0.2);
         `;
         tracks.forEach((track, i) => {
-          const isCurrentTrack = model.currentMusic?.track.url === track.url;
+        const isCurrentTrack = model.currentMusic?.track.id === track.id;
           const row = document.createElement("div");
           row.style.cssText = `
             display:flex;align-items:center;gap:10px;
@@ -566,7 +566,9 @@ AudioPlugin.UI = {
       favSection.innerHTML = `<div style="font-size:0.68em;text-transform:uppercase;color:#f1c40f;margin-bottom:8px;letter-spacing:1px;font-weight:600;">⭐ Favoritos</div>`;
       const grid = document.createElement("div");
       grid.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;";
-      model.favoriteEffects.forEach(fav => grid.appendChild(this._makeEffectButton(fav.category, { name: fav.name, url: fav.url })));
+       model.favoriteEffects.forEach(fav => grid.appendChild(
+        this._makeEffectButton(fav.category, { name: fav.name, id: fav.id })
+      ));
       favSection.appendChild(grid);
       content.appendChild(favSection);
     }
@@ -596,7 +598,7 @@ AudioPlugin.UI = {
     const playBtn = document.createElement("button");
     playBtn.textContent = "🔊 " + track.name;
     playBtn.style.cssText = `padding:7px 12px;background:transparent;color:#ccc;border:none;cursor:pointer;font-size:0.78em;`;
-    playBtn.onclick = () => AudioPlugin.Control.triggerEffect(track.url || track.id, !track.url && !!track.id);
+  playBtn.onclick = () => AudioPlugin.Control.triggerEffect(track.id, true || track.id, !track.url && !!track.id);
     playBtn.addEventListener("mouseenter", () => { playBtn.style.color = "#fff"; wrapper.style.borderColor = "rgba(255,255,255,0.15)"; });
     playBtn.addEventListener("mouseleave", () => { playBtn.style.color = "#ccc"; wrapper.style.borderColor = "rgba(255,255,255,0.07)"; });
 

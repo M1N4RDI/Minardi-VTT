@@ -1,14 +1,24 @@
 <script>
 /* ============================================================
-   AudioPlugin.Drive — VERSÃO MIGRADA (sem base64)
+   AudioPlugin.Drive — VERSÃO CORRIGIDA (compatível com o boot
+   e com audio-ui.html / audio-control.html já existentes)
    ------------------------------------------------------------
-   Mudança principal: scanAudioLibrary() agora retorna apenas
-   {id, name} por track. A URL pública é montada aqui no client
-   com AudioPlugin.Drive.buildUrl(fileId), nunca mais com
-   "data:audio/...;base64,...".
+   O bug original: este arquivo tinha connect/scanLibrary/
+   rescanLibrary mas NÃO tinha init(), e audio-main.html chama
+   AudioPlugin.Drive.init() no boot. Resultado: TypeError e o
+   AudioPlugin inteiro para de inicializar (Player, Control, UI
+   nunca rodam, porque o boot quebra antes de chegar neles).
 
-   Pré-requisito: os arquivos no Drive precisam estar com
-   permissão "Qualquer pessoa com o link pode visualizar".
+   Esta versão:
+   1. Adiciona init() (não faz nada de especial, só loga — mantém
+      o boot compatível com os outros módulos que também têm
+      init() vazio/simples).
+   2. scanAudioLibrary() no servidor retorna {id, name} por track
+      (sem dataUrl) — então cada track novo é "carregado sob
+      demanda" pelo Player via _loadAudioById, que é chamado
+      diretamente por audio-control.html. Por isso este arquivo
+      NÃO precisa de buildUrl() nem de lógica de URL pública:
+      isso é responsabilidade do audio-player.html.
    ============================================================ */
 
 window.AudioPlugin = window.AudioPlugin || {};
@@ -17,15 +27,8 @@ AudioPlugin.Drive = {
 
   _scanning: false,
 
-  /**
-   * Monta a URL pública de streaming a partir do fileId.
-   * Esta é a função-chave da migração: antes a track já vinha
-   * com track.url pronto (base64). Agora track.id vem do servidor
-   * e a URL é construída aqui, sob demanda.
-   */
-  buildUrl(fileId) {
-    if (!fileId) return null;
-    return "https://drive.google.com/uc?export=view&id=" + fileId;
+  init() {
+    console.log("AudioPlugin.Drive INIT");
   },
 
   connect(onSuccess, onError) {
@@ -36,9 +39,14 @@ AudioPlugin.Drive = {
           if (onError) onError(result.error);
           return;
         }
-        AudioPlugin.Model.setAudioFolderId(result.audioFolderId);
+        AudioPlugin.Model.audioFolderId = result.audioFolderId;
+        AudioPlugin.Model._saveToStorage();
         console.log("[AudioPlugin.Drive] Conectado. audioFolderId:", result.audioFolderId);
         if (onSuccess) onSuccess(result.audioFolderId);
+        // Conectar já dispara o primeiro scan, igual ao comportamento
+        // original (_onConnectClick chamava scanLibrary só quando já
+        // havia um ID digitado; aqui cobrimos o caso de ID novo).
+        AudioPlugin.Drive.scanLibrary();
       })
       .withFailureHandler(err => {
         console.error("[AudioPlugin.Drive] Falha RPC ensureAudioStructure:", err.message);
@@ -48,9 +56,11 @@ AudioPlugin.Drive = {
   },
 
   scanLibrary(onSuccess, onError) {
-    const folderId = AudioPlugin.Model.getAudioFolderId();
+    const folderId = AudioPlugin.Model.audioFolderId;
     if (!folderId) {
-      if (onError) onError("audioFolderId não definido. Conecte o Drive primeiro.");
+      const msg = "audioFolderId não definido. Conecte o Drive primeiro.";
+      console.warn("[AudioPlugin.Drive]", msg);
+      if (onError) onError(msg);
       return;
     }
     if (this._scanning) {
@@ -58,24 +68,37 @@ AudioPlugin.Drive = {
       return;
     }
     this._scanning = true;
+    if (AudioPlugin.UI && AudioPlugin.UI.setStatus) {
+      AudioPlugin.UI.setStatus("⏳ Escaneando biblioteca...");
+    }
 
     google.script.run
       .withSuccessHandler(result => {
         AudioPlugin.Drive._scanning = false;
         if (result && result.error) {
           console.error("[AudioPlugin.Drive] Erro ao escanear:", result.error);
+          if (AudioPlugin.UI && AudioPlugin.UI.setStatus) {
+            AudioPlugin.UI.setStatus("❌ " + result.error);
+          }
           if (onError) onError(result.error);
           return;
         }
         // result = { music: {...}, ambience: {...}, effects: {...} }
-        // cada track = { id, name } — SEM dataUrl.
+        // cada track = { id, name } — SEM dataUrl/url.
         AudioPlugin.Model.setLibrary(result);
-        console.log("[AudioPlugin.Drive] Biblioteca carregada (modo URL direta).");
+        if (AudioPlugin.UI) {
+          if (AudioPlugin.UI.setStatus) AudioPlugin.UI.setStatus("✅ Biblioteca carregada.");
+          if (AudioPlugin.UI.renderLibrary) AudioPlugin.UI.renderLibrary();
+        }
+        console.log("[AudioPlugin.Drive] Biblioteca carregada (modo id sob demanda).");
         if (onSuccess) onSuccess(result);
       })
       .withFailureHandler(err => {
         AudioPlugin.Drive._scanning = false;
         console.error("[AudioPlugin.Drive] Falha RPC scanAudioLibrary:", err.message);
+        if (AudioPlugin.UI && AudioPlugin.UI.setStatus) {
+          AudioPlugin.UI.setStatus("❌ " + err.message);
+        }
         if (onError) onError(err.message);
       })
       .scanAudioLibrary(folderId);
