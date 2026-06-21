@@ -187,19 +187,50 @@ ScenePlugin.UI = {
    BOOT
    ---------------------------------------------------------- */
 ScenePlugin.boot = function () {
+  let attempts = 0;
+
+  function checkDeps() {
+    // Lista de dependências nomeadas individualmente (em vez de um
+    // único booleano) para que, se o boot nunca completar, seja
+    // possível dizer exatamente QUAL dependência está faltando —
+    // foi a falta disso que tornou o bug anterior invisível: o
+    // namespace real do plugin de iluminação é "Lighting", não
+    // "LightPlugin" (nome que eu tinha assumido sem confirmar contra
+    // o código real). Isso fazia esta checagem nunca ficar "ready",
+    // e o setInterval girava para sempre, em silêncio, sem log e
+    // sem erro.
+    return {
+      sidebar: !!document.getElementById("sidebar"),
+      VTTMode: !!window.VTTMode,
+      TokenPlugin: !!(window.TokenPlugin && TokenPlugin.Model),
+      Lighting: !!(window.Lighting && Lighting.Model),
+      AudioPlugin: !!(window.AudioPlugin && AudioPlugin.Model),
+      BibliotecaPlugin: !!(window.BibliotecaPlugin && BibliotecaPlugin.Model)
+    };
+  }
+
   function waitForDeps(cb) {
     const t = setInterval(() => {
-      const ready =
-        document.getElementById("sidebar") &&
-        window.VTTMode &&
-        window.TokenPlugin && TokenPlugin.Model &&
-        window.LightPlugin && LightPlugin.Model &&
-        window.AudioPlugin && AudioPlugin.Model &&
-        window.BibliotecaPlugin && BibliotecaPlugin.Model; // necessário para restaurar mapas
+      attempts++;
+      const deps = checkDeps();
+      const ready = Object.values(deps).every(Boolean);
 
       if (ready) {
         clearInterval(t);
         cb();
+        return;
+      }
+
+      // Depois de ~10s (100 tentativas a cada 100ms) sem sucesso,
+      // para de tentar e diz exatamente o que está faltando, em vez
+      // de girar para sempre sem nenhum log visível.
+      if (attempts >= 100) {
+        clearInterval(t);
+        const faltando = Object.entries(deps)
+          .filter(([, ok]) => !ok)
+          .map(([nome]) => nome);
+        console.error("[ScenePlugin] boot abortado após 10s — dependência(s) " +
+          "nunca ficaram prontas: " + faltando.join(", "));
       }
     }, 100);
   }

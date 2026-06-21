@@ -273,9 +273,18 @@ ScenePlugin.Model = {
   },
 
   _captureLighting() {
-    if (!window.LightPlugin || !LightPlugin.Model) return null;
-    const m = LightPlugin.Model;
+    if (!window.Lighting || !Lighting.Model) return null;
+    const m = Lighting.Model;
     // Preserva IDs originais — não regenerar.
+    // ⚠️ darknessObjects/lightObjects/wallObjects são nomes herdados
+    // da documentação original (anterior ao rename LightPlugin ->
+    // Lighting). Avisa se não baterem, em vez de salvar tudo vazio
+    // em silêncio.
+    if (!("darknessObjects" in m) && !("lightObjects" in m) && !("wallObjects" in m)) {
+      console.warn("[ScenePlugin] Lighting.Model não tem os campos esperados ao " +
+        "capturar a cena — a iluminação salva pode ficar vazia mesmo se houver " +
+        "paredes/luzes no mapa. Verifique os nomes reais em lighting-model.html.");
+    }
     return {
       darknessObjects: JSON.parse(JSON.stringify(m.darknessObjects || [])),
       lightObjects: JSON.parse(JSON.stringify(m.lightObjects || [])),
@@ -320,11 +329,26 @@ ScenePlugin.Model = {
       }
     }
     // Iluminação
-    if (window.LightPlugin && LightPlugin.Model) {
-      LightPlugin.Model.darknessObjects = [];
-      LightPlugin.Model.lightObjects = [];
-      LightPlugin.Model.wallObjects = [];
-      if (LightPlugin.Model._save) LightPlugin.Model._save();
+    // ⚠️ darknessObjects/lightObjects/wallObjects/_save() são nomes
+    // herdados da documentação original do projeto, de antes do
+    // namespace ser renomeado de LightPlugin para Lighting. Não
+    // confirmados contra o código-fonte atual (lighting-model.html
+    // real). Se algo aqui não bater, avisa no console em vez de
+    // falhar em silêncio ou travar o resto de clearCurrentScene().
+    if (window.Lighting && Lighting.Model) {
+      const lm = Lighting.Model;
+      if ("darknessObjects" in lm && "lightObjects" in lm && "wallObjects" in lm) {
+        lm.darknessObjects = [];
+        lm.lightObjects = [];
+        lm.wallObjects = [];
+        if (typeof lm._save === "function") lm._save();
+      } else {
+        console.warn("[ScenePlugin] Lighting.Model não tem os campos esperados " +
+          "(darknessObjects/lightObjects/wallObjects). A iluminação pode não ter " +
+          "sido limpa. Verifique os nomes reais em lighting-model.html.");
+      }
+    } else {
+      console.warn("[ScenePlugin] window.Lighting não disponível ao limpar cena.");
     }
     // Áudio
     if (window.AudioPlugin && AudioPlugin.Control && AudioPlugin.Control.silence) {
@@ -494,8 +518,8 @@ ScenePlugin.Model = {
   },
 
   _restoreLighting(lighting) {
-    if (!window.LightPlugin || !LightPlugin.Model || !lighting) return;
-    const m = LightPlugin.Model;
+    if (!window.Lighting || !Lighting.Model || !lighting) return;
+    const m = Lighting.Model;
     m.darknessObjects = JSON.parse(JSON.stringify(lighting.darknessObjects || []));
     m.lightObjects = JSON.parse(JSON.stringify(lighting.lightObjects || []));
     m.wallObjects = JSON.parse(JSON.stringify(lighting.wallObjects || []));
@@ -563,7 +587,7 @@ ScenePlugin.Model = {
 
   _refreshUIAndRedraw() {
     if (window.TokenPlugin && TokenPlugin.Canvas) TokenPlugin.Canvas.draw();
-    if (window.LightPlugin && LightPlugin.Canvas) LightPlugin.Canvas.redraw();
+    if (window.Lighting && Lighting.Render && Lighting.Render.draw) Lighting.Render.draw();
     if (window.ScenePlugin && ScenePlugin.UI && ScenePlugin.UI.refreshList) {
       ScenePlugin.UI.refreshList();
     }
