@@ -18,14 +18,23 @@ ScenePlugin.UI = {
   _container: null,
 
   init() {
-    this._buildSidebarSection();
-    this.refreshHeader();
-    this.refreshAutosaveToggle();
+    try {
+      this._buildSidebarSection();
+      this.refreshHeader();
+      this.refreshAutosaveToggle();
 
-    // conecta e já lista as cenas existentes
-    ScenePlugin.Control.connectAndRefresh();
+      // conecta e já lista as cenas existentes
+      ScenePlugin.Control.connectAndRefresh();
 
-    console.log("[ScenePlugin.UI] init OK");
+      console.log("[ScenePlugin.UI] init OK");
+    } catch (e) {
+      // Captura qualquer exceção síncrona para que ela apareça
+      // explicitamente no console em vez de matar o init() em
+      // silêncio (foi assim que o bug original passou despercebido:
+      // um addEventListener sobre elemento null interrompia a função
+      // sem deixar rastro visível).
+      console.error("[ScenePlugin.UI] Erro durante init():", e);
+    }
   },
 
   _buildSidebarSection() {
@@ -35,47 +44,76 @@ ScenePlugin.UI = {
       return;
     }
 
+    if (document.getElementById("scene-section")) {
+      return; // já construída — evita duplicar se init() rodar 2x
+    }
+
+    // Usa a mesma estrutura .category / .category-title que todas as
+    // outras seções da sidebar usam (Arquivos, Ferramentas de Grid,
+    // etc). "sidebar-section" não existe no projeto real — isso
+    // criava um elemento "órfão" sem o tratamento de collapse do core.
     const section = document.createElement("div");
-    section.className = "sidebar-section";
+    section.className = "category";
     section.id = "scene-section";
     section.innerHTML = `
-      <h3 class="sidebar-section-title">Cenas</h3>
+      <div class="category-title">Cenas</div>
 
-      <div id="scene-current-name" class="scene-current-name">
-        (cena sem nome)
-      </div>
+      <div class="control-group">
+        <div id="scene-current-name" class="scene-current-name">
+          (cena sem nome)
+        </div>
 
-      <div class="scene-buttons-row">
-        <button id="scene-btn-new" title="Nova Cena">Nova Cena</button>
-        <button id="scene-btn-save" title="Salvar Cena">Salvar Cena</button>
-      </div>
-      <div class="scene-buttons-row">
-        <button id="scene-btn-save-as" title="Salvar Como">Salvar Como</button>
-      </div>
+        <div class="scene-buttons-row">
+          <button id="scene-btn-new" class="btn-full" title="Nova Cena">Nova Cena</button>
+          <button id="scene-btn-save" class="btn-full" title="Salvar Cena">Salvar Cena</button>
+        </div>
+        <div class="scene-buttons-row">
+          <button id="scene-btn-save-as" class="btn-full" title="Salvar Como">Salvar Como</button>
+        </div>
 
-      <label class="scene-autosave-toggle">
-        <input type="checkbox" id="scene-autosave-checkbox" />
-        Autosave ao trocar de cena
-      </label>
+        <label class="scene-autosave-toggle">
+          <input type="checkbox" id="scene-autosave-checkbox" />
+          Autosave ao trocar de cena
+        </label>
 
-      <div id="scene-list" class="scene-list">
-        <div class="scene-list-empty">Nenhuma cena carregada ainda.</div>
+        <div id="scene-list" class="scene-list">
+          <div class="scene-list-empty">Nenhuma cena carregada ainda.</div>
+        </div>
       </div>
     `;
     sidebar.appendChild(section);
     this._container = section;
 
-    document.getElementById("scene-btn-new")
-      .addEventListener("click", () => ScenePlugin.Control.newScene());
+    // initCollapseForCategory (definida em javascript.html) injeta o
+    // botão [−]/[+] e reestrutura os filhos da .category em
+    // .category-body. Chamamos manualmente porque essa seção foi
+    // criada depois do setTimeout que faz isso para as categorias
+    // estáticas do index.html.
+    if (typeof initCollapseForCategory === "function") {
+      initCollapseForCategory(section);
+    }
 
-    document.getElementById("scene-btn-save")
-      .addEventListener("click", () => ScenePlugin.Control.saveCurrentScene());
+    // Bindings defensivos: se algum elemento não existir por algum
+    // motivo, loga e segue em vez de lançar TypeError e interromper
+    // o resto do init() (foi exatamente isso que travou o boot antes:
+    // uma exceção aqui matava o console.log final em silêncio).
+    this._bindClick("scene-btn-new", () => ScenePlugin.Control.newScene());
+    this._bindClick("scene-btn-save", () => ScenePlugin.Control.saveCurrentScene());
+    this._bindClick("scene-btn-save-as", () => this.promptSaveAs());
+    this._bindEvent("scene-autosave-checkbox", "change", () => ScenePlugin.Control.toggleAutosave());
+  },
 
-    document.getElementById("scene-btn-save-as")
-      .addEventListener("click", () => this.promptSaveAs());
+  _bindClick(id, handler) {
+    this._bindEvent(id, "click", handler);
+  },
 
-    document.getElementById("scene-autosave-checkbox")
-      .addEventListener("change", () => ScenePlugin.Control.toggleAutosave());
+  _bindEvent(id, eventName, handler) {
+    const el = document.getElementById(id);
+    if (!el) {
+      console.error("[ScenePlugin.UI] Elemento #" + id + " não encontrado — listener não registrado.");
+      return;
+    }
+    el.addEventListener(eventName, handler);
   },
 
   promptSaveAs() {
@@ -167,9 +205,13 @@ ScenePlugin.boot = function () {
   }
 
   waitForDeps(() => {
-    ScenePlugin.Model.init();
-    ScenePlugin.UI.init();
-    console.log("[ScenePlugin] boot completo.");
+    try {
+      ScenePlugin.Model.init();
+      ScenePlugin.UI.init();
+      console.log("[ScenePlugin] boot completo.");
+    } catch (e) {
+      console.error("[ScenePlugin] Erro durante boot:", e);
+    }
   });
 };
 
@@ -177,9 +219,6 @@ ScenePlugin.boot();
 </script>
 
 <style>
-  #scene-section .sidebar-section-title {
-    margin-bottom: 6px;
-  }
   .scene-current-name {
     font-size: 0.85em;
     opacity: 0.8;
