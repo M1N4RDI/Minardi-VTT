@@ -887,19 +887,14 @@ function renderGallery(files) {
  img.dataset.tokenThumb = "1";
  img._tokenFile = file;
 
- img.addEventListener("dragstart", function(e) {
-
- if (!file.dataUrl) {
-
- e.preventDefault();
-
- return;
-
- }
-
- e.dataTransfer.setData("token-image", file.dataUrl);
-
- });
+img.addEventListener("dragstart", function(e) {
+        if (!file.dataUrl) {
+          e.preventDefault();
+          return;
+        }
+        e.dataTransfer.setData("token-image", file.dataUrl);
+        e.dataTransfer.setData("token-image-fileid", getFileId(file)); // NOVO
+      });
 
  img.onclick = function() {
 
@@ -910,6 +905,8 @@ function renderGallery(files) {
  if (!file.dataUrl) { alert("A miniatura ainda está carregando."); return; }
 
  selected.appearance.image = file.dataUrl;
+
+ selected.appearance.driveFileId = getFileId(file); // NOVO — referência p/ ScenePlugin
 
  TokenPlugin.Canvas.draw();
 
@@ -1063,17 +1060,19 @@ function renderGallery(files) {
             e.preventDefault();
         });
 
-        map.addEventListener("drop", (e) => {
-            if (!VTTMode.is("tokens")) return;
-            e.preventDefault();
-            const image = e.dataTransfer.getData("token-image");
-            if (!image) return;
-            const pos   = TokenPlugin.Control.mouseToGrid(e);
-            const token = TokenPlugin.Model.create(pos.gx, pos.gy);
-            token.appearance.image = image;
-            TokenPlugin.Model.selectOnly(token.id);
-            TokenPlugin.Canvas.draw();
-        });
+map.addEventListener("drop", (e) => {
+        if (!VTTMode.is("tokens")) return;
+        e.preventDefault();
+        const image   = e.dataTransfer.getData("token-image");
+        const fileId  = e.dataTransfer.getData("token-image-fileid"); // NOVO
+        if (!image) return;
+        const pos   = TokenPlugin.Control.mouseToGrid(e);
+        const token = TokenPlugin.Model.create(pos.gx, pos.gy);
+        token.appearance.image = image;
+        if (fileId) token.appearance.driveFileId = fileId; // NOVO
+        TokenPlugin.Model.selectOnly(token.id);
+        TokenPlugin.Canvas.draw();
+      });
     }
 
 })();

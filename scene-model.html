@@ -232,27 +232,18 @@ ScenePlugin.Model = {
   _captureTokens() {
     if (!window.TokenPlugin || !TokenPlugin.Model) return [];
 
-    // O token guarda appearance.image já resolvido (URL/dataUrl), sem
-    // referência ao arquivo de origem. Para achar o driveFileId,
-    // comparamos com a imageLibrary do TokenPlugin — cada entrada lá
-    // carrega driveFileId desde que veio do BibliotecaPlugin
-    // (ver biblioteca-ui.html: _popularTokens). Tokens cuja imagem foi
-    // carregada por outro caminho (ex: galeria antiga) não terão
-    // driveFileId e a imagem simplesmente não será restaurada depois.
-    const library = TokenPlugin.Model.getImageLibrary() || [];
-
+    // O token agora guarda appearance.driveFileId diretamente, gravado
+    // no momento em que a imagem é atribuída (ver patch em
+    // token-ui.html: clique na galeria e drop no mapa). Não tentamos
+    // mais "adivinhar" o driveFileId comparando strings de dataUrl
+    // contra a imageLibrary — essa comparação falhava sempre, porque
+    // a entrada na galeria podia nunca ter sido "tocada" (dataUrl
+    // ainda null) mesmo que o token já tivesse a imagem.
     return TokenPlugin.Model.all().map(t => {
       const clone = JSON.parse(JSON.stringify(t)); // deep clone simples, só dados
 
       if (clone.appearance) {
-        const currentImg = clone.appearance.image;
-        let driveFileId = null;
-        if (currentImg) {
-          const found = library.find(img => img.dataUrl === currentImg);
-          driveFileId = found ? found.driveFileId : null;
-        }
-        clone.appearance.driveFileId = driveFileId;
-        delete clone.appearance.image; // remove URL/dataUrl pesada ou volátil
+        delete clone.appearance.image; // remove dataUrl pesada/volátil — nunca salva na cena
       }
       return clone;
     });
@@ -405,16 +396,15 @@ ScenePlugin.Model = {
       return;
     }
 
-    const library = TokenPlugin.Model.getImageLibrary ? TokenPlugin.Model.getImageLibrary() : [];
-    const pendingImageLoads = []; // tokens cuja imagem ainda não tem dataUrl carregado
-
-    function resolveImage(driveFileId) {
-      if (!driveFileId) return { image: null, pending: false };
-      const found = library.find(img => img.driveFileId === driveFileId);
-      if (!found) return { image: null, pending: false }; // asset não está mais na biblioteca
-      if (!found.dataUrl) return { image: null, pending: true }; // existe, mas ainda não carregado
-      return { image: found.dataUrl, pending: false };
-    }
+    // Usa o mesmo cache que token-ui.html já mantém para miniaturas
+    // da galeria (TokenPlugin._thumbCache[fileId] = dataUrl). Isso
+    // evita um RPC novo se a imagem já tiver sido carregada por
+    // qualquer outro caminho (galeria aberta, outro token igual,
+    // etc.) — e mantém um único cache central, em vez de duplicar
+    // a lógica em outro lugar.
+    TokenPlugin._thumbCache = TokenPlugin._thumbCache || {};
+    const cache = TokenPlugin._thumbCache;
+    const pendingImageLoads = []; // tokens cujo dataUrl ainda não está no cache
 
     // _buildToken(data) só lê data.image/data.color/data.name/data.notes
     // e SEMPRE zera stats/effects/light/bars/initiative/armor para o
@@ -423,7 +413,7 @@ ScenePlugin.Model = {
     // no mesmo padrão usado em TokenPlugin.Model.pasteClipboard().
     const rebuilt = tokens.map(saved => {
       const driveFileId = saved.appearance ? saved.appearance.driveFileId : null;
-      const { image, pending } = resolveImage(driveFileId);
+      const image = (driveFileId && cache[driveFileId]) ? cache[driveFileId] : null;
 
       const t = TokenPlugin.Model._buildToken({
         gx: saved.gx,
@@ -435,8 +425,10 @@ ScenePlugin.Model = {
         notes: saved.notes
       });
 
-      // Preserva o ID original da cena salva (restoreAll recalcula
-      // nextId depois, então não há risco de colisão).
+      // Preserva o driveFileId e o ID original da cena salva
+      // (restoreAll recalcula nextId depois, então não há risco de
+      // colisão de id).
+      if (driveFileId) t.appearance.driveFileId = driveFileId;
       if (typeof saved.id === "number") t.id = saved.id;
 
       if (saved.stats) t.stats = JSON.parse(JSON.stringify(saved.stats));
@@ -446,7 +438,7 @@ ScenePlugin.Model = {
       if (saved.armor) t.armor = JSON.parse(JSON.stringify(saved.armor));
       if (saved.initiative !== undefined) t.initiative = saved.initiative;
 
-      if (pending && driveFileId) {
+      if (!image && driveFileId) {
         pendingImageLoads.push({ tokenId: t.id, driveFileId });
       }
 
@@ -456,30 +448,33 @@ ScenePlugin.Model = {
     TokenPlugin.Model.restoreAll(rebuilt);
 
     if (pendingImageLoads.length > 0) {
-      console.warn("[ScenePlugin] " + pendingImageLoads.length +
-        " token(s) restaurado(s) sem imagem carregada ainda (dataUrl pendente na " +
-        "Etapa 1 do BibliotecaPlugin). Os tokens aparecem com a cor de fallback até " +
-        "a imagem ser carregada sob demanda.");
+      console.log("[ScenePlugin] Carregando imagem sob demanda para " +
+        pendingImageLoads.length + " token(s) (cor de fallback até a imagem chegar).");
       this._loadPendingTokenImages(pendingImageLoads);
     }
   },
 
   /**
-   * Tenta carregar sob demanda o dataUrl dos tokens cuja imagem ainda
-   * não tinha sido baixada (BibliotecaPlugin só guarda metadados até
-   * a imagem ser usada pela primeira vez). Usa o mesmo RPC que o mapa
-   * usa (getFileAsDataUrl), já que a Etapa 1 de tokens ainda não existe.
+   * Carrega sob demanda o dataUrl dos tokens cujo fileId ainda não
+   * estava no cache. Usa exatamente o mesmo RPC (getFileAsDataUrl) e
+   * o mesmo cache (TokenPlugin._thumbCache) que a galeria de tokens
+   * em token-ui.html já usa para suas miniaturas — um único cache
+   * compartilhado, sem lógica duplicada.
    */
   _loadPendingTokenImages(pendingList) {
+    TokenPlugin._thumbCache = TokenPlugin._thumbCache || {};
+
     pendingList.forEach(item => {
       google.script.run
         .withSuccessHandler(resultado => {
-          if (!resultado || resultado.erro || !resultado.dataUrl) return;
+          if (!resultado || resultado.erro || !resultado.dataUrl) {
+            console.warn("[ScenePlugin] Falha ao carregar imagem do token " +
+              item.tokenId + " (fileId " + item.driveFileId + "):",
+              resultado && resultado.erro);
+            return;
+          }
 
-          // Atualiza a entrada na imageLibrary para não precisar buscar de novo.
-          const library = TokenPlugin.Model.getImageLibrary();
-          const entry = library.find(img => img.driveFileId === item.driveFileId);
-          if (entry) entry.dataUrl = resultado.dataUrl;
+          TokenPlugin._thumbCache[item.driveFileId] = resultado.dataUrl;
 
           // Aplica no token já restaurado, se ele ainda existir.
           const token = TokenPlugin.Model.getById(item.tokenId);
@@ -489,7 +484,7 @@ ScenePlugin.Model = {
           }
         })
         .withFailureHandler(err => {
-          console.warn("[ScenePlugin] Falha ao carregar imagem pendente de token:", err.message);
+          console.warn("[ScenePlugin] Falha RPC ao carregar imagem pendente de token:", err.message);
         })
         .getFileAsDataUrl(item.driveFileId);
     });
